@@ -9,7 +9,6 @@ use App\Http\Requests\Security\ResetDashboardUserPasswordRequest;
 use App\Http\Requests\Security\StoreDashboardUserRequest;
 use App\Http\Requests\Security\UpdateDashboardUserRequest;
 use App\Models\DashboardUser;
-use App\Services\SalesPersonDirectoryService;
 use App\Services\Security\DashboardPermissionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -21,7 +20,6 @@ final class SecurityUserController extends Controller
     public function index(
         Request $request,
         DashboardPermissionService $permissions,
-        SalesPersonDirectoryService $salesPersonDirectory,
     ): View {
         /** @var DashboardUser|null $currentUser */
         $currentUser = $request->attributes->get('dashboard_user');
@@ -35,7 +33,6 @@ final class SecurityUserController extends Controller
             'users' => $users,
             'roles' => $permissions->roleOptions($currentUser?->isAdmin() ?? false),
             'canManageAdministrator' => $currentUser?->isAdmin() ?? false,
-            'salesPersonOptions' => $salesPersonDirectory->options('BOTH'),
         ]);
     }
 
@@ -56,11 +53,10 @@ final class SecurityUserController extends Controller
             'username' => strtolower(trim((string) $request->validated('username'))),
             'password' => Hash::make((string) $request->validated('password')),
             'role' => $role,
-            'sales_person_id' => $request->validated('sales_person_id'),
             'is_active' => true,
         ]);
 
-        return back()->with('status', 'Pengguna dashboard berhasil dibuat.');
+        return back()->with('status', 'Pengguna Service berhasil dibuat.');
     }
 
     public function update(
@@ -100,7 +96,6 @@ final class SecurityUserController extends Controller
         $dashboardUser->forceFill([
             'name' => trim((string) $request->validated('name')),
             'role' => $requestedRole,
-            'sales_person_id' => $request->validated('sales_person_id'),
             'is_active' => $isActive,
         ])->save();
 

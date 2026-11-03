@@ -23,15 +23,6 @@ final class InstallDashboardSecurity extends Command
     public function handle(): int
     {
         $connection = (string) config('dashboard_security.connection', 'sqlite_targets');
-        if ((string) config("database.connections.{$connection}.driver") !== 'sqlite') {
-            $this->components->error('Installer Service hanya boleh memakai SQLite lokal.');
-            return self::FAILURE;
-        }
-        $dbPath = (string) config("database.connections.{$connection}.database");
-        if (basename(str_replace('\\', '/', $dbPath)) !== 'service-security.sqlite') {
-            $this->components->error('TARGET_DB_DATABASE wajib menunjuk database/service-security.sqlite, bukan database sales.');
-            return self::FAILURE;
-        }
         $this->ensureSqliteFileExists($connection);
 
         // Jangan menjalankan semua migration project asal.
@@ -52,19 +43,17 @@ final class InstallDashboardSecurity extends Command
         }
 
         $this->components->info('Menjalankan migration security Service pada '.$connection.'...');
-        foreach ($securityMigrations as $migration) {
-            $this->components->info('Migration: '.$migration);
-            $exitCode = Artisan::call('migrate', [
-                '--database' => $connection,
-                '--path' => [$migration],
-                '--force' => true,
-                '--no-interaction' => true,
-            ]);
-            $this->output->write(Artisan::output());
-            if ($exitCode !== self::SUCCESS) {
-                $this->components->error('Migration keamanan gagal. Tidak melanjutkan.');
-                return self::FAILURE;
-            }
+        $exitCode = Artisan::call('migrate', [
+            '--database' => $connection,
+            '--path' => $securityMigrations,
+            '--force' => true,
+            '--no-interaction' => true,
+        ]);
+
+        $this->output->write(Artisan::output());
+        if ($exitCode !== self::SUCCESS) {
+            $this->components->error('Migration security gagal.');
+            return self::FAILURE;
         }
 
         $username = strtolower(trim((string) ($this->option('username') ?: config('dashboard_auth.username'))));

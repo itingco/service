@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Route;
 
 class RouteServiceProvider extends ServiceProvider
 {
-    public const HOME = '/sales-dashboard';
+    public const HOME = '/service-quotations';
 
     public function boot(): void
     {
@@ -19,11 +19,9 @@ class RouteServiceProvider extends ServiceProvider
         });
 
         $this->routes(function (): void {
-            Route::middleware('api')->prefix('api')->group(base_path('routes/api.php'));
+            // Project ini hanya membuka halaman Service / Sparepart.
             Route::middleware('web')->group(base_path('routes/web.php'));
-
-            // Modul Penawaran Service dipindahkan ke project service-sparepart terpisah.
-            // routes/service_quotations.php sengaja tidak lagi dimuat oleh Sales Dashboard.
+            Route::middleware('web')->group(base_path('routes/service_quotations.php'));
         });
     }
 }
