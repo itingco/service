@@ -1,0 +1,111 @@
+<?php
+
+use App\Http\Controllers\AccountPasswordController;
+use App\Http\Controllers\DashboardAuthController;
+use App\Http\Controllers\DashboardHomeController;
+use App\Http\Controllers\SalesDashboardController;
+use App\Http\Controllers\SalesInsightsController;
+use App\Http\Controllers\SalesKpiController;
+use App\Http\Controllers\SalesKpiTargetController;
+use App\Http\Controllers\StockAgingController;
+use App\Http\Controllers\Security\SecurityAuditController;
+use App\Http\Controllers\Security\SecurityDeviceController;
+use App\Http\Controllers\Security\SecurityRoleController;
+use App\Http\Controllers\Security\SecurityUserController;
+use Illuminate\Support\Facades\Route;
+
+Route::get('/login', [DashboardAuthController::class, 'create'])->name('dashboard.login');
+Route::post('/login', [DashboardAuthController::class, 'store'])->name('dashboard.login.store');
+Route::redirect('/device/pending', '/login'); // Legacy compatibility; device approval is no longer required.
+
+Route::middleware(['dashboard.auth', 'dashboard.audit'])->group(function (): void {
+    Route::get('/', DashboardHomeController::class)->name('dashboard.home');
+    Route::redirect('/sales-by-item', '/sales-dashboard');
+
+    Route::get('/account/password', [AccountPasswordController::class, 'edit'])
+        ->name('account.password.edit');
+    Route::put('/account/password', [AccountPasswordController::class, 'update'])
+        ->name('account.password.update');
+
+    Route::middleware('dashboard.permission:sales_dashboard')->group(function (): void {
+        Route::get('/sales-dashboard', [SalesDashboardController::class, 'index'])
+            ->name('sales-dashboard.index');
+        Route::get('/sales-dashboard/details', [SalesDashboardController::class, 'details'])
+            ->name('sales-dashboard.details');
+        Route::get('/sales-dashboard/export/excel', [SalesDashboardController::class, 'exportExcel'])
+            ->name('sales-dashboard.export.excel');
+        Route::get('/sales-dashboard/export/pdf', [SalesDashboardController::class, 'exportPdf'])
+            ->name('sales-dashboard.export.pdf');
+    });
+
+    Route::middleware('dashboard.permission:sales_kpi')->group(function (): void {
+        Route::get('/sales-kpi', [SalesKpiController::class, 'index'])
+            ->name('sales-kpi.index');
+        Route::get('/sales-kpi/details', [SalesKpiController::class, 'details'])
+            ->name('sales-kpi.details');
+        Route::get('/sales-kpi/export/excel', [SalesKpiController::class, 'exportExcel'])
+            ->name('sales-kpi.export.excel');
+        Route::get('/sales-kpi/details/export/excel', [SalesKpiController::class, 'exportDetailsExcel'])
+            ->name('sales-kpi.details.export.excel');
+        Route::get('/sales-kpi/export/pdf', [SalesKpiController::class, 'exportPdf'])
+            ->name('sales-kpi.export.pdf');
+    });
+
+    Route::middleware('dashboard.permission:sales_insights')->group(function (): void {
+        Route::get('/sales-insights', [SalesInsightsController::class, 'index'])
+            ->name('sales-insights.index');
+        Route::get('/sales-insights/export/excel', [SalesInsightsController::class, 'exportExcel'])
+            ->name('sales-insights.export.excel');
+    });
+
+    Route::middleware('dashboard.permission:stock_aging')->group(function (): void {
+        Route::get('/stock-aging', [StockAgingController::class, 'index'])
+            ->name('stock-aging.index');
+        Route::get('/stock-aging/details', [StockAgingController::class, 'details'])
+            ->name('stock-aging.details');
+        Route::get('/stock-aging/details/export/excel', [StockAgingController::class, 'exportDetailsExcel'])
+            ->name('stock-aging.details.export.excel');
+    });
+
+    Route::middleware('dashboard.permission:kpi_targets')->group(function (): void {
+        Route::get('/sales-kpi/targets', [SalesKpiTargetController::class, 'index'])
+            ->name('sales-kpi.targets.index');
+        Route::put('/sales-kpi/targets', [SalesKpiTargetController::class, 'update'])
+            ->name('sales-kpi.targets.update');
+    });
+
+    Route::middleware('dashboard.permission:security_users')->group(function (): void {
+        Route::get('/security/users', [SecurityUserController::class, 'index'])
+            ->name('security.users.index');
+        Route::post('/security/users', [SecurityUserController::class, 'store'])
+            ->name('security.users.store');
+        Route::put('/security/users/{dashboardUser}', [SecurityUserController::class, 'update'])
+            ->name('security.users.update');
+        Route::put('/security/users/{dashboardUser}/password', [SecurityUserController::class, 'resetPassword'])
+            ->name('security.users.password');
+    });
+
+    Route::middleware('dashboard.permission:security_roles')->group(function (): void {
+        Route::get('/security/roles', [SecurityRoleController::class, 'index'])
+            ->name('security.roles.index');
+        Route::post('/security/roles', [SecurityRoleController::class, 'store'])
+            ->name('security.roles.store');
+        Route::put('/security/roles/{dashboardRole}', [SecurityRoleController::class, 'update'])
+            ->name('security.roles.update');
+    });
+
+    Route::middleware('dashboard.permission:security_devices')->group(function (): void {
+        Route::get('/security/devices', [SecurityDeviceController::class, 'index'])
+            ->name('security.devices.index');
+        Route::put('/security/devices/{dashboardDevice}', [SecurityDeviceController::class, 'update'])
+            ->name('security.devices.update');
+    });
+
+    Route::middleware('dashboard.permission:security_audits')->group(function (): void {
+        Route::get('/security/audits', [SecurityAuditController::class, 'index'])
+            ->name('security.audits.index');
+    });
+
+    Route::post('/logout', [DashboardAuthController::class, 'destroy'])
+        ->name('dashboard.logout');
+});

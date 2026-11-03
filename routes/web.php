@@ -1,0 +1,198 @@
+<?php
+
+use App\Http\Controllers\AccountPasswordController;
+use App\Http\Controllers\BusinessAnalyticsController;
+use App\Http\Controllers\BusinessAnalyticsSyncController;
+use App\Http\Controllers\CustomerAnalysisController;
+use App\Http\Controllers\ProductStrategyAdvisorController;
+use App\Http\Controllers\ProductStrategyCatalogController;
+use App\Http\Controllers\DashboardAuthController;
+use App\Http\Controllers\DashboardHomeController;
+use App\Http\Controllers\SalesDashboardController;
+use App\Http\Controllers\SalesInsightsController;
+use App\Http\Controllers\SalesKpiController;
+use App\Http\Controllers\SalesKpiTargetController;
+use App\Http\Controllers\StockAgingController;
+use App\Http\Controllers\StockStrategyReviewController;
+use App\Http\Controllers\ThreeMonthSalesReviewController;
+use App\Http\Controllers\Security\SecurityAuditController;
+use App\Http\Controllers\Security\SecurityDeviceController;
+use App\Http\Controllers\Security\SecurityRoleController;
+use App\Http\Controllers\Security\SecurityUserController;
+use Illuminate\Support\Facades\Route;
+
+Route::get('/login', [DashboardAuthController::class, 'create'])->name('dashboard.login');
+Route::post('/login', [DashboardAuthController::class, 'store'])->name('dashboard.login.store');
+Route::redirect('/device/pending', '/login'); // Legacy compatibility; device approval is no longer required.
+
+Route::middleware(['dashboard.auth', 'dashboard.audit'])->group(function (): void {
+    Route::get('/', DashboardHomeController::class)->name('dashboard.home');
+    Route::redirect('/sales-by-item', '/sales-dashboard');
+
+    Route::get('/account/password', [AccountPasswordController::class, 'edit'])
+        ->name('account.password.edit');
+    Route::put('/account/password', [AccountPasswordController::class, 'update'])
+        ->name('account.password.update');
+
+    Route::middleware('dashboard.permission:sales_dashboard')->group(function (): void {
+        Route::get('/sales-dashboard', [SalesDashboardController::class, 'index'])
+            ->name('sales-dashboard.index');
+        Route::get('/sales-dashboard/details', [SalesDashboardController::class, 'details'])
+            ->name('sales-dashboard.details');
+        Route::get('/sales-dashboard/export/excel', [SalesDashboardController::class, 'exportExcel'])
+            ->name('sales-dashboard.export.excel');
+        Route::get('/sales-dashboard/export/pdf', [SalesDashboardController::class, 'exportPdf'])
+            ->name('sales-dashboard.export.pdf');
+    });
+
+    Route::middleware('dashboard.permission:sales_review_3_months')->group(function (): void {
+        Route::get('/sales-review-3-months', [ThreeMonthSalesReviewController::class, 'index'])
+            ->name('sales-review-3-months.index');
+        Route::get('/sales-review-3-months/export/excel', [ThreeMonthSalesReviewController::class, 'exportExcel'])
+            ->name('sales-review-3-months.export.excel');
+        Route::get('/sales-review-3-months/export/pdf', [ThreeMonthSalesReviewController::class, 'exportPdf'])
+            ->name('sales-review-3-months.export.pdf');
+    });
+
+    Route::middleware('dashboard.permission:customer_analysis')->group(function (): void {
+        Route::get('/customer-analysis', [CustomerAnalysisController::class, 'index'])
+            ->name('customer-analysis.index');
+        Route::get('/customer-analysis/export/excel', [CustomerAnalysisController::class, 'exportExcel'])
+            ->name('customer-analysis.export.excel');
+        Route::get('/customer-analysis/{source}/{customerId}', [CustomerAnalysisController::class, 'show'])
+            ->where('source', 'INGCO|SMI')
+            ->where('customerId', '[0-9]+')
+            ->name('customer-analysis.show');
+    });
+
+    Route::get('/business-intelligence', [\App\Http\Controllers\BusinessIntelligenceHubController::class, 'index'])
+        ->middleware('dashboard.permission:business_analytics')
+        ->name('business-intelligence.index');
+
+    Route::middleware('dashboard.permission:business_analytics')->group(function (): void {
+        Route::get('/business-analytics', [BusinessAnalyticsController::class, 'index'])
+            ->name('business-analytics.index');
+        Route::post('/business-analytics/targets', [BusinessAnalyticsController::class, 'saveTargets'])
+            ->middleware('dashboard.permission:kpi_targets')
+            ->name('business-analytics.targets.save');
+        Route::get('/business-analytics/export/csv', [BusinessAnalyticsController::class, 'exportCsv'])
+            ->name('business-analytics.export.csv');
+        Route::get('/business-analytics/export/pdf', [BusinessAnalyticsController::class, 'exportPdf'])->name('business-analytics.export.pdf');
+        Route::post('/business-analytics/sync/36-months', [BusinessAnalyticsSyncController::class, 'start'])->name('business-analytics.sync.start');
+        Route::get('/business-analytics/sync/status', [BusinessAnalyticsSyncController::class, 'status'])->name('business-analytics.sync.status');
+
+        Route::get('/business-analytics/product-advisor', [ProductStrategyAdvisorController::class, 'index'])->name('business-analytics.product-advisor.index');
+        Route::get('/business-analytics/product-advisor/export/pdf', [ProductStrategyAdvisorController::class, 'exportPdf'])->name('business-analytics.product-advisor.export.pdf');
+        Route::get('/business-analytics/product-advisor/items', [ProductStrategyAdvisorController::class, 'items'])->name('business-analytics.product-advisor.items');
+        Route::post('/business-analytics/product-advisor/profile', [ProductStrategyAdvisorController::class, 'saveProfile'])->name('business-analytics.product-advisor.profile');
+        Route::post('/business-analytics/product-advisor/research', [ProductStrategyAdvisorController::class, 'research'])->name('business-analytics.product-advisor.research');
+        Route::post('/business-analytics/product-advisor/ask', [ProductStrategyAdvisorController::class, 'ask'])->name('business-analytics.product-advisor.ask');
+        Route::post('/business-analytics/product-advisor/experiments', [ProductStrategyAdvisorController::class, 'createExperiment'])->name('business-analytics.product-advisor.experiments.create');
+        Route::patch('/business-analytics/product-advisor/experiments/{experiment}', [ProductStrategyAdvisorController::class, 'updateExperiment'])->name('business-analytics.product-advisor.experiments.update');
+        Route::post('/business-analytics/product-advisor/experiments/{experiment}/evaluate', [ProductStrategyAdvisorController::class, 'evaluateExperiment'])->name('business-analytics.product-advisor.experiments.evaluate');
+    });
+
+    Route::middleware('dashboard.permission:product_focus')->group(function (): void {
+        Route::get('/business-analytics/product-focus', [ProductStrategyCatalogController::class, 'productFocusIndex'])->name('product-strategy.product-focus.index');
+        Route::post('/business-analytics/product-focus', [ProductStrategyCatalogController::class, 'productFocusStore'])->name('product-strategy.product-focus.store');
+        Route::delete('/business-analytics/product-focus/{id}', [ProductStrategyCatalogController::class, 'productFocusDelete'])->name('product-strategy.product-focus.delete');
+        Route::post('/business-analytics/product-focus/import', [ProductStrategyCatalogController::class, 'productFocusImport'])->name('product-strategy.product-focus.import');
+        Route::get('/business-analytics/product-focus/export', [ProductStrategyCatalogController::class, 'productFocusExport'])->name('product-strategy.product-focus.export');
+        Route::get('/business-analytics/product-focus/template', [ProductStrategyCatalogController::class, 'productFocusTemplate'])->name('product-strategy.product-focus.template');
+    });
+
+    Route::middleware('dashboard.permission:similar_items')->group(function (): void {
+        Route::get('/business-analytics/similar-items', [ProductStrategyCatalogController::class, 'similarItemsIndex'])->name('product-strategy.similar-items.index');
+        Route::post('/business-analytics/similar-items', [ProductStrategyCatalogController::class, 'similarItemsStore'])->name('product-strategy.similar-items.store');
+        Route::delete('/business-analytics/similar-items/{id}', [ProductStrategyCatalogController::class, 'similarItemsDelete'])->name('product-strategy.similar-items.delete');
+        Route::post('/business-analytics/similar-items/import', [ProductStrategyCatalogController::class, 'similarItemsImport'])->name('product-strategy.similar-items.import');
+        Route::get('/business-analytics/similar-items/export', [ProductStrategyCatalogController::class, 'similarItemsExport'])->name('product-strategy.similar-items.export');
+        Route::get('/business-analytics/similar-items/template', [ProductStrategyCatalogController::class, 'similarItemsTemplate'])->name('product-strategy.similar-items.template');
+    });
+
+    Route::middleware('dashboard.permission:sales_kpi')->group(function (): void {
+        Route::get('/sales-kpi', [SalesKpiController::class, 'index'])
+            ->name('sales-kpi.index');
+        Route::get('/sales-kpi/details', [SalesKpiController::class, 'details'])
+            ->name('sales-kpi.details');
+        Route::get('/sales-kpi/export/excel', [SalesKpiController::class, 'exportExcel'])
+            ->name('sales-kpi.export.excel');
+        Route::get('/sales-kpi/details/export/excel', [SalesKpiController::class, 'exportDetailsExcel'])
+            ->name('sales-kpi.details.export.excel');
+        Route::get('/sales-kpi/export/pdf', [SalesKpiController::class, 'exportPdf'])
+            ->name('sales-kpi.export.pdf');
+    });
+
+    Route::middleware('dashboard.permission:sales_insights')->group(function (): void {
+        Route::get('/sales-insights', [SalesInsightsController::class, 'index'])
+            ->name('sales-insights.index');
+        Route::get('/sales-insights/export/excel', [SalesInsightsController::class, 'exportExcel'])
+            ->name('sales-insights.export.excel');
+    });
+
+    Route::middleware('dashboard.permission:stock_aging')->group(function (): void {
+        Route::get('/stock-aging', [StockAgingController::class, 'index'])
+            ->name('stock-aging.index');
+        Route::get('/stock-aging/strategy-review', [StockStrategyReviewController::class, 'index'])
+            ->name('stock-aging.strategy-review');
+        Route::get('/stock-aging/details', [StockAgingController::class, 'details'])
+            ->name('stock-aging.details');
+        Route::get('/stock-aging/details/export/excel', [StockAgingController::class, 'exportDetailsExcel'])
+            ->name('stock-aging.details.export.excel');
+    });
+
+    Route::middleware('dashboard.permission:kpi_targets')->group(function (): void {
+        Route::get('/sales-kpi/targets', [SalesKpiTargetController::class, 'index'])
+            ->name('sales-kpi.targets.index');
+        Route::put('/sales-kpi/targets', [SalesKpiTargetController::class, 'update'])
+            ->name('sales-kpi.targets.update');
+    });
+
+    Route::middleware('dashboard.permission:security_users')->group(function (): void {
+        Route::get('/security/users', [SecurityUserController::class, 'index'])
+            ->name('security.users.index');
+        Route::post('/security/users', [SecurityUserController::class, 'store'])
+            ->name('security.users.store');
+        Route::put('/security/users/{dashboardUser}', [SecurityUserController::class, 'update'])
+            ->name('security.users.update');
+        Route::put('/security/users/{dashboardUser}/password', [SecurityUserController::class, 'resetPassword'])
+            ->name('security.users.password');
+    });
+
+    Route::middleware('dashboard.permission:security_roles')->group(function (): void {
+        Route::get('/security/roles', [SecurityRoleController::class, 'index'])
+            ->name('security.roles.index');
+        Route::post('/security/roles', [SecurityRoleController::class, 'store'])
+            ->name('security.roles.store');
+        Route::put('/security/roles/{dashboardRole}', [SecurityRoleController::class, 'update'])
+            ->name('security.roles.update');
+    });
+
+    Route::middleware('dashboard.permission:security_devices')->group(function (): void {
+        Route::get('/security/devices', [SecurityDeviceController::class, 'index'])
+            ->name('security.devices.index');
+        Route::put('/security/devices/{dashboardDevice}', [SecurityDeviceController::class, 'update'])
+            ->name('security.devices.update');
+    });
+
+    Route::middleware('dashboard.permission:security_audits')->group(function (): void {
+        Route::get('/security/audits', [SecurityAuditController::class, 'index'])
+            ->name('security.audits.index');
+    });
+
+    Route::post('/logout', [DashboardAuthController::class, 'destroy'])
+        ->name('dashboard.logout');
+});
+
+// SPAREPART SEARCH: protected route; retained independently of other report modules.
+Route::middleware(['dashboard.auth', 'dashboard.audit', 'dashboard.permission:sparepart_search'])
+    ->get('/spareparts/search', [\App\Http\Controllers\SparepartSearchController::class, 'index'])
+    ->name('spareparts.search');
+
+// Master klasifikasi gudang - access restricted to existing Product Focus master editors.
+Route::middleware(['dashboard.auth', 'dashboard.audit', 'dashboard.permission:product_focus'])->group(function (): void {
+    Route::get('/warehouse-categories', [\App\Http\Controllers\WarehouseCategoryController::class, 'index'])->name('warehouse-categories.index');
+    Route::post('/warehouse-categories', [\App\Http\Controllers\WarehouseCategoryController::class, 'store'])->name('warehouse-categories.store');
+    Route::put('/warehouse-categories/{id}', [\App\Http\Controllers\WarehouseCategoryController::class, 'update'])->whereNumber('id')->name('warehouse-categories.update');
+    Route::delete('/warehouse-categories/{id}', [\App\Http\Controllers\WarehouseCategoryController::class, 'destroy'])->whereNumber('id')->name('warehouse-categories.destroy');
+});

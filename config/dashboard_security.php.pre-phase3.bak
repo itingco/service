@@ -1,0 +1,84 @@
+<?php
+
+return [
+    'connection' => env('DASHBOARD_SECURITY_CONNECTION', 'sqlite_targets'),
+    'password_min_length' => max(1, (int) env('DASHBOARD_PASSWORD_MIN_LENGTH', 8)),
+
+    'device_cookie' => env('DASHBOARD_DEVICE_COOKIE', 'dashboard_device_token'),
+    'device_cookie_minutes' => (int) env('DASHBOARD_DEVICE_COOKIE_MINUTES', 525600),
+    'device_cookie_secure' => env('DASHBOARD_DEVICE_COOKIE_SECURE', env('APP_ENV') === 'production'),
+    'device_cookie_same_site' => env('DASHBOARD_DEVICE_COOKIE_SAME_SITE', 'strict'),
+
+    'session_idle_minutes' => (int) env('DASHBOARD_SESSION_IDLE_MINUTES', 30),
+    'login_max_attempts' => (int) env('DASHBOARD_LOGIN_MAX_ATTEMPTS', 5),
+    'login_ip_max_attempts' => (int) env('DASHBOARD_LOGIN_IP_MAX_ATTEMPTS', 15),
+    'login_decay_seconds' => (int) env('DASHBOARD_LOGIN_DECAY_SECONDS', 60),
+
+    'session_user_id_key' => 'dashboard_user_id',
+    'session_user_name_key' => 'dashboard_user_name',
+    'session_user_role_key' => 'dashboard_user_role',
+    'session_device_id_key' => 'dashboard_device_id',
+    'session_last_activity_key' => 'dashboard_last_activity_at',
+    'pending_user_id_key' => 'dashboard_pending_user_id',
+    'pending_device_id_key' => 'dashboard_pending_device_id',
+
+    // Legacy labels are kept as bootstrap/fallback values. New roles are stored in SQLite.
+    'roles' => [
+        'admin' => 'Administrator',
+        'direksi' => 'Direksi',
+        'sales' => 'Sales',
+        'rnd' => 'Research & Development',
+        'viewer' => 'Viewer',
+    ],
+
+    'menus' => [
+        'sales_dashboard' => ['label' => 'Dashboard Penjualan', 'route' => 'sales-dashboard.index', 'group' => 'Laporan'],
+        'sales_kpi' => ['label' => 'Dashboard KPI', 'route' => 'sales-kpi.index', 'group' => 'Laporan'],
+        'sales_insights' => ['label' => 'Sales Insights & R&D', 'route' => 'sales-insights.index', 'group' => 'Laporan'],
+        'business_analytics' => ['label' => 'Business Analytics', 'route' => 'business-analytics.index', 'group' => 'Laporan'],
+        'stock_aging' => ['label' => 'Sisa Stok & Stock Aging', 'route' => 'stock-aging.index', 'group' => 'Laporan'],
+        'kpi_targets' => ['label' => 'Pengaturan Target KPI', 'route' => 'sales-kpi.targets.index', 'group' => 'Pengaturan'],
+        'security_users' => ['label' => 'Pengguna', 'route' => 'security.users.index', 'group' => 'Keamanan'],
+        'security_roles' => ['label' => 'Role & Permission', 'route' => 'security.roles.index', 'group' => 'Keamanan'],
+        'security_devices' => ['label' => 'Riwayat Perangkat', 'route' => 'security.devices.index', 'group' => 'Keamanan'],
+        'security_audits' => ['label' => 'Audit Aktivitas', 'route' => 'security.audits.index', 'group' => 'Keamanan'],
+    ],
+
+    // Preserve the existing default behavior: users who can access KPI land there first.
+    'landing_menu_order' => ['sales_kpi', 'sales_dashboard', 'sales_insights', 'business_analytics', 'stock_aging', 'kpi_targets', 'security_users', 'security_roles', 'security_devices', 'security_audits'],
+
+    // Preserves the pre-permission behavior if the new migration has not run yet.
+    'legacy_role_menus' => [
+        'direksi' => ['sales_dashboard', 'sales_kpi', 'sales_insights', 'business_analytics'],
+        'sales' => ['sales_dashboard', 'sales_kpi', 'sales_insights', 'business_analytics'],
+        'rnd' => ['sales_dashboard', 'sales_kpi', 'sales_insights', 'business_analytics'],
+        'viewer' => ['sales_dashboard', 'sales_kpi'],
+    ],
+
+    'audited_routes' => [
+        'sales-dashboard.index' => 'view_sales_dashboard',
+        'sales-dashboard.details' => 'view_sales_dashboard_details',
+        'sales-dashboard.export.excel' => 'export_sales_dashboard_excel',
+        'sales-dashboard.export.pdf' => 'export_sales_dashboard_pdf',
+        'sales-insights.index' => 'view_sales_insights',
+        'sales-insights.export.excel' => 'export_sales_insights_excel',
+        'business-analytics.index' => 'view_business_analytics',
+        'business-analytics.export.csv' => 'export_business_analytics_csv',
+        'business-analytics.targets.save' => 'update_business_analytics_targets',
+        'sales-kpi.index' => 'view_sales_kpi',
+        'sales-kpi.details' => 'view_sales_kpi_details',
+        'sales-kpi.export.excel' => 'export_sales_kpi_excel',
+        'sales-kpi.details.export.excel' => 'export_sales_kpi_details_excel',
+        'sales-kpi.export.pdf' => 'export_sales_kpi_pdf',
+        'stock-aging.index' => 'view_stock_aging',
+        'stock-aging.details' => 'view_stock_aging_details',
+        'sales-kpi.targets.update' => 'update_sales_kpi_targets',
+        'security.users.store' => 'create_dashboard_user',
+        'security.users.update' => 'update_dashboard_user',
+        'security.users.password' => 'reset_dashboard_user_password',
+        'security.roles.store' => 'create_dashboard_role',
+        'security.roles.update' => 'update_dashboard_role',
+        'account.password.update' => 'change_own_password',
+        'security.devices.update' => 'rename_dashboard_device',
+    ],
+];

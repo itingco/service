@@ -1,0 +1,151 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\BusinessAnalytics;
+
+use App\Data\BusinessAnalytics\BusinessAnalyticsFilter;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Facades\DB;
+
+final class AnalyticsRepository
+{
+    /** @return array<string,float> */
+    public function monthlyTrend(BusinessAnalyticsFilter $filter, int $months = 36): array
+    {
+        $start = date('Y-m', strtotime($filter->endMonth.'-01 -'.($months - 1).' months'));
+        $rows = $this->base($filter)
+            ->whereBetween('period', [$start, $filter->endMonth])
+            ->selectRaw('period, SUM(sales_amount) AS sales')
+            ->groupBy('period')
+            ->orderBy('period')
+            ->get();
+
+        $found = [];
+        foreach ($rows as $row) {
+            $found[(string) $row->period] = (float) $row->sales;
+        }
+
+        if ($found === []) {
+            return [];
+        }
+
+        $firstFound = array_key_first($found);
+        $series = [];
+        for ($cursor = new \DateTimeImmutable($firstFound.'-01'); $cursor <= new \DateTimeImmutable($filter->endMonth.'-01'); $cursor = $cursor->modify('+1 month')) {
+            $period = $cursor->format('Y-m');
+            $series[$period] = $found[$period] ?? 0.0;
+        }
+
+        return $series;
+    }
+
+    /** @return list<array{year:string,sales:float,growth:?float}> */
+    public function yearlySummary(BusinessAnalyticsFilter $filter): array
+    {
+        $cutoffMonth = (int) substr($filter->endMonth, 5, 2);
+        $rows = $this->base($filter)
+            ->whereRaw('CAST(substr(period, 6, 2) AS INTEGER) <= ?', [$cutoffMonth])
+            ->selectRaw("substr(period, 1, 4) AS year, SUM(sales_amount) AS sales")
+            ->groupByRaw("substr(period, 1, 4)")
+            ->orderBy('year')
+            ->get();
+
+        $result = [];
+        $previous = null;
+        foreach ($rows as $row) {
+            $sales = (float) $row->sales;
+            $result[] = [
+                'year' => (string) $row->year,
+                'sales' => $sales,
+                'growth' => $previous !== null && $previous != 0.0 ? ($sales / $previous) - 1.0 : null,
+            ];
+            $previous = $sales;
+        }
+        return $result;
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function breakdown(BusinessAnalyticsFilter $filter): array
+    {
+        [$keyExpression, $labelExpression] = match ($filter->groupBy) {
+            'company' => ['source', 'source'],
+            'line' => ['sales_line', 'sales_line'],
+            'customer' => ["CASE WHEN customer_code = '' THEN customer_name ELSE customer_code END", "CASE WHEN customer_name = '' THEN customer_code ELSE customer_name END"],
+            'salesperson' => ["CASE WHEN salesperson_name = '' THEN '(TANPA SALES)' ELSE salesperson_name END", "CASE WHEN salesperson_name = '' THEN '(Tanpa Sales)' ELSE salesperson_name END"],
+            'item' => ["CASE WHEN item_code = '' THEN item_name ELSE item_code END", "CASE WHEN item_name = '' THEN item_code ELSE item_name END"],
+            default => ['source', 'source'],
+        };
+
+        $currentStart = date('Y-m', strtotime($filter->endMonth.'-01 -2 months'));
+        $priorStart = date('Y-m', strtotime($filter->endMonth.'-01 -14 months'));
+        $priorEnd = date('Y-m', strtotime($filter->endMonth.'-01 -12 months'));
+
+        $currentRows = $this->base($filter)
+            ->whereBetween('period', [$currentStart, $filter->endMonth])
+            ->selectRaw("{$keyExpression} AS dimension_key, {$labelExpression} AS dimension_label, SUM(sales_amount) AS sales, SUM(quantity) AS quantity, SUM(invoice_count) AS invoices")
+            ->groupByRaw($keyExpression.', '.$labelExpression)
+            ->get();
+
+        $priorRows = $this->base($filter)
+            ->whereBetween('period', [$priorStart, $priorEnd])
+            ->selectRaw("{$keyExpression} AS dimension_key, SUM(sales_amount) AS sales")
+            ->groupByRaw($keyExpression)
+            ->pluck('sales', 'dimension_key');
+
+        $total = (float) $currentRows->sum('sales');
+        $result = [];
+        foreach ($currentRows as $row) {
+            $key = trim((string) $row->dimension_key);
+            if ($key === '') {
+                $key = '(KOSONG)';
+            }
+            $sales = (float) $row->sales;
+            $prior = isset($priorRows[$row->dimension_key]) ? (float) $priorRows[$row->dimension_key] : 0.0;
+            $result[] = [
+                'key' => $key,
+                'label' => trim((string) $row->dimension_label) ?: $key,
+                'sales' => $sales,
+                'quantity' => (float) $row->quantity,
+                'invoices' => (int) $row->invoices,
+                'contribution' => $total > 0.0 ? $sales / $total : null,
+                'yoy_growth' => $prior > 0.0 ? ($sales / $prior) - 1.0 : null,
+            ];
+        }
+
+        usort($result, static fn (array $a, array $b): int => $b['sales'] <=> $a['sales']);
+        return array_slice($result, 0, 100);
+    }
+
+    public function latestPeriod(): ?string
+    {
+        $period = DB::connection('sqlite_targets')->table('business_analytics_monthly_sales')->max('period');
+        return $period ? (string) $period : null;
+    }
+
+    public function totalForPeriod(BusinessAnalyticsFilter $filter, string $period): float
+    {
+        return (float) $this->base($filter)->where('period', $period)->sum('sales_amount');
+    }
+
+    private function base(BusinessAnalyticsFilter $filter): Builder
+    {
+        $query = DB::connection('sqlite_targets')->table('business_analytics_monthly_sales');
+        $query->whereIn('source', $filter->sources());
+
+        if ($filter->line !== null) {
+            $query->where('sales_line', $filter->line);
+        }
+        if ($filter->customerCode !== null) {
+            $customer = $filter->customerCode;
+            $query->where(function (Builder $q) use ($customer): void {
+                $q->where('customer_code', $customer)->orWhere('customer_name', $customer);
+            });
+        }
+        if ($filter->salesperson !== null) {
+            $query->where('salesperson_name', $filter->salesperson);
+        }
+
+        return $query;
+    }
+}

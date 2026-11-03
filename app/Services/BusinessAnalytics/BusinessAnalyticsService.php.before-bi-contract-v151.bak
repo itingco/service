@@ -1,0 +1,88 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\BusinessAnalytics;
+
+use App\Data\BusinessAnalytics\BusinessAnalyticsFilter;
+
+final class BusinessAnalyticsService
+{
+    public function __construct(
+        private readonly AnalyticsRepository $repository,
+        private readonly ForecastEngine $forecastEngine,
+        private readonly TargetService $targets,
+        private readonly InsightService $insights,
+    ) {
+    }
+
+    /** @return array<string,mixed> */
+    public function build(BusinessAnalyticsFilter $filter): array
+    {
+        $trend = $this->repository->monthlyTrend($filter, 36);
+        $forecastTraining = $this->forecastTrainingSeries($trend, $filter->endMonth);
+        $forecast = $this->forecastEngine->forecast($forecastTraining, 3);
+        foreach ($forecast as &$row) {
+            $target = $this->targets->targetFor($filter, $row['period']);
+            $row['official_target'] = $target;
+            $row['recommended_target'] = round($row['forecast'] * 1.05, -3);
+            $row['status'] = ForecastEngine::targetStatus($row['forecast'], $target);
+            $row['gap_to_target'] = $target !== null ? $row['forecast'] - $target : null;
+        }
+        unset($row);
+
+        $breakdown = $this->repository->breakdown($filter);
+        $current = $trend[$filter->endMonth] ?? 0.0;
+        $previousMonthKey = date('Y-m', strtotime($filter->endMonth.'-01 -1 month'));
+        $previousMonth = $trend[$previousMonthKey] ?? 0.0;
+        $priorYearKey = date('Y-m', strtotime($filter->endMonth.'-01 -1 year'));
+        $priorYear = $trend[$priorYearKey] ?? 0.0;
+
+        return [
+            'filter' => $filter,
+            'trend' => $trend,
+            'forecast' => $forecast,
+            'breakdown' => $breakdown,
+            'yearly' => $this->repository->yearlySummary($filter),
+            'insights' => $this->insights->build($trend, $breakdown),
+            'current_sales' => $current,
+            'mom_growth' => $previousMonth > 0.0 ? ($current / $previousMonth) - 1.0 : null,
+            'yoy_growth' => $priorYear > 0.0 ? ($current / $priorYear) - 1.0 : null,
+            'latest_period' => $this->repository->latestPeriod(),
+            'target_scope' => $this->targets->scope($filter),
+        ];
+    }
+
+    /** @param array<string,float> $trend @return array<string,float> */
+    private function forecastTrainingSeries(array $trend, string $endMonth): array
+    {
+        if ($trend === [] || $endMonth !== now()->format('Y-m')) {
+            return $trend;
+        }
+
+        $today = now();
+        $daysInMonth = (int) $today->daysInMonth;
+        if ((int) $today->day >= $daysInMonth) {
+            return $trend;
+        }
+
+        $elapsedSellingDays = 0;
+        $totalSellingDays = 0;
+        for ($day = 1; $day <= $daysInMonth; $day++) {
+            $date = $today->copy()->day($day);
+            if ($date->dayOfWeek === 0) {
+                continue;
+            }
+            $totalSellingDays++;
+            if ($day <= (int) $today->day) {
+                $elapsedSellingDays++;
+            }
+        }
+
+        if ($elapsedSellingDays > 0 && isset($trend[$endMonth])) {
+            $trend[$endMonth] = $trend[$endMonth] / $elapsedSellingDays * max(1, $totalSellingDays);
+        }
+
+        return $trend;
+    }
+}

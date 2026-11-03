@@ -1,0 +1,311 @@
+@extends('layouts.app')
+
+@section('title', 'Stock & Aging Review')
+
+@push('styles')
+<style>
+    .stock-filter,.stock-card,.group-panel,.data-card{background:#fff;border:1px solid #d0d5dd;border-radius:12px;box-shadow:0 6px 18px rgba(16,24,40,.05)}
+    .stock-card{padding:1rem 1.1rem;height:100%}.stock-card .label{color:#667085;font-size:.74rem;font-weight:800;text-transform:uppercase;letter-spacing:.02em}.stock-card .value{color:#101828;font-size:1.3rem;font-weight:900;margin-top:.25rem;font-variant-numeric:tabular-nums}
+    .filter-note{color:#667085;font-size:.73rem;line-height:1.35}.group-chip{display:inline-flex;align-items:center;gap:.45rem;padding:.45rem .65rem;border:1px solid #98a2b3;border-radius:8px;background:#f8fafc;font-size:.78rem;font-weight:800;cursor:grab;user-select:none}.group-chip.dragging{opacity:.45}.group-chip .remove-group{border:0;background:transparent;color:#b42318;padding:0;line-height:1;font-size:1rem}.group-empty{color:#98a2b3;font-size:.78rem;padding:.45rem 0}
+    .group-table th[data-sort-type]{cursor:pointer;user-select:none}.group-table th[data-sort-type]:hover{background:#233654}.group-table th[data-sort-type]::after{content:" ↕";opacity:.55}.group-table th[aria-sort="ascending"]::after{content:" ▲";opacity:1}.group-table th[aria-sort="descending"]::after{content:" ▼";opacity:1}.group-table{font-size:.78rem;font-variant-numeric:tabular-nums;margin:0}.group-table th{background:#101828;color:#fff;white-space:nowrap;position:sticky;top:0;z-index:3}.group-table td{vertical-align:middle}.group-table .number{text-align:right;white-space:nowrap}.group-table tbody tr:hover td{background:#fff8dc}.group-table .ratio-low{color:#b42318;font-weight:900}.group-table .group-value{font-weight:700}.table-shell{max-height:68vh;overflow:auto;border-radius:0 0 12px 12px}
+    .rule-box{background:#fff7d6;border:1px solid #efd273;border-radius:10px;padding:.8rem 1rem;font-size:.77rem;line-height:1.45}.rule-box strong{color:#101828}.db-pill{display:inline-flex;align-items:center;padding:.28rem .55rem;border-radius:999px;background:#f2f4f7;border:1px solid #d0d5dd;font-weight:800;font-size:.72rem}
+</style>
+@endpush
+
+@section('content')
+@php
+    $money = static fn($value) => 'Rp '.number_format((float)$value,0,',','.');
+    $qty = static fn($value) => number_format((float)$value,2,',','.');
+    $ratio = static fn($value) => $value === null ? '—' : number_format((float)$value,1,',','.').' %';
+@endphp
+
+<div class="d-flex flex-column flex-xl-row justify-content-between align-items-xl-end gap-3 mb-3">
+    <div>
+        <div class="small fw-bold text-warning">SISA STOK + STOCK AGING + STRATEGIC REVIEW</div>
+        <h1 class="h4 fw-bold mb-1">Stock &amp; Aging Review</h1>
+        <div class="text-secondary small">Satu halaman untuk melihat, mengelompokkan, dan export data stok secara fleksibel.</div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        <span class="db-pill">Per {{ $filter->selectedDate->format('d-m-Y') }}</span>
+        <a class="btn btn-success btn-sm" href="{{ route('stock-aging.index', $exportQuery) }}"><i class="bi bi-file-earmark-excel me-1"></i>Export Raw Excel</a>
+    </div>
+</div>
+
+@if($error)
+    <div class="alert alert-danger" style="white-space:pre-line">{{ $error }}</div>
+@endif
+
+<form class="stock-filter p-3 mb-3" method="GET" action="{{ route('stock-aging.index') }}" id="stockFilterForm">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-3 col-xl-2">
+            <label class="form-label fw-bold">Tanggal</label>
+            <input type="date" class="form-control" name="date" value="{{ $filter->selectedDate->format('Y-m-d') }}" required>
+        </div>
+        <div class="col-md-3 col-xl-2">
+            <label class="form-label fw-bold">Database</label>
+            <select class="form-select" name="database">
+                <option value="all" @selected($filter->database==='all')>Gabungan</option>
+                <option value="ingco" @selected($filter->database==='ingco')>INGCO</option>
+                <option value="wadfow" @selected($filter->database==='wadfow')>WADFOW</option>
+                <option value="smi" @selected($filter->database==='smi')>SMI</option>
+            </select>
+            <div class="filter-note mt-1">AS_SMI otomatis dipisah: brand WADFOW → WADFOW, selain itu → SMI.</div>
+        </div>
+        <div class="col-md-6 col-xl-3">
+            <label class="form-label fw-bold">Status Item</label>
+            <select class="form-select" name="item_status">
+                <option value="all" @selected($filter->itemStatus==='all')>Semua</option>
+                <option value="normal" @selected($filter->itemStatus==='normal')>Normal</option>
+                <option value="discontinued" @selected($filter->itemStatus==='discontinued')>Discontinue</option>
+                <option value="discontinued_sale" @selected($filter->itemStatus==='discontinued_sale')>Discontinue + Sale</option>
+                <option value="reject" @selected($filter->itemStatus==='reject')>Item Reject</option>
+            </select>
+        </div>
+        <div class="col-md-6 col-xl-3">
+            <label class="form-label fw-bold">Warehouse <span class="badge text-bg-primary">Multi Select</span></label>
+            <x-warehouse-multi-select id="stockAgingWarehousePicker" :options="$warehouseOptions" :selected="$warehouseKeys" />
+        </div>
+        <div class="col-md-6 col-xl-2">
+            <label class="form-label fw-bold">Product Focus</label>
+            <select class="form-select" name="focus">
+                <option value="">Semua Focus</option>
+                @foreach($focusOptions as $option)
+                    <option value="{{ $option }}" @selected($focus===$option)>{{ $option }}</option>
+                @endforeach
+            </select>
+        </div>
+
+        <div class="col-12">
+            <div class="group-panel p-3 shadow-none">
+                <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end">
+                    <div class="flex-grow-1">
+                        <label class="form-label fw-bold mb-2">Group By <span class="text-secondary fw-normal">— drag untuk ubah urutan</span></label>
+                        <div id="groupChipList" class="d-flex flex-wrap gap-2" data-fields='@json($groupFields)'>
+                            @foreach($groupFields as $field)
+                                <div class="group-chip" draggable="true" data-field="{{ $field }}">
+                                    <i class="bi bi-grip-vertical text-secondary"></i>
+                                    <span>{{ $groupFieldOptions[$field] ?? $field }}</span>
+                                    <button type="button" class="remove-group" title="Hapus group">×</button>
+                                </div>
+                            @endforeach
+                        </div>
+                        <div id="groupHiddenInputs"></div>
+                        @if($groupFields === [])<div class="group-empty" id="groupEmptyLabel">Belum ada grouping. Pilih field lalu klik Tambah untuk mengelompokkan data.</div>@endif
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap align-items-end">
+                        <div>
+                            <label class="form-label fw-bold">Tambah Group</label>
+                            <select class="form-select form-select-sm" id="groupFieldSelect">
+                                @foreach($groupFieldOptions as $key=>$label)<option value="{{ $key }}">{{ $label }}</option>@endforeach
+                            </select>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-dark" id="addGroupBtn"><i class="bi bi-plus-lg me-1"></i>Tambah</button>
+                        <button type="submit" class="btn btn-sm btn-report"><i class="bi bi-funnel me-1"></i>Terapkan</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="rule-box mb-3">
+    <strong>Aturan status:</strong>
+    Normal = master item tidak discontinue dan bukan gudang SALE ·
+    Discontinue = master item discontinue tetapi tidak ada di <code>SBS_DiscountRules</code> ·
+    Discontinue + Sale = master item discontinue dan ada di <code>SBS_DiscountRules</code> ·
+    Item Reject = stok berada di warehouse yang kode/namanya mengandung “SALE”.
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-sm-6 col-xl-3"><div class="stock-card"><div class="label">Total Sisa Stok</div><div class="value">{{ $money($report->grandTotal['sisa_stock']) }}</div></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="stock-card"><div class="label">Sales MTD Item Stok</div><div class="value">{{ $money($report->grandTotal['sales_mtd']) }}</div></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="stock-card"><div class="label">Sisa Stok &gt;120 Hari</div><div class="value">{{ $money($report->over120Stock) }}</div></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="stock-card"><div class="label">Item / Warehouse</div><div class="value">{{ number_format($report->totalItems,0,',','.') }}</div><div class="small text-secondary">{{ number_format($report->totalWarehouses,0,',','.') }} warehouse source</div></div></div>
+</div>
+
+<div class="data-card overflow-hidden">
+    <div class="p-3 border-bottom d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
+        <div>
+            <div class="fw-bold">{{ $groupFields === [] ? 'Detail Stok (Tanpa Group)' : 'Hasil Grouping' }}</div>
+            <div class="small text-secondary">@if($groupFields === []){{ number_format(count($report->detailRows),0,',','.') }} baris detail. Tambahkan group bila diperlukan.@else{{ number_format(count($groupedRows),0,',','.') }} baris group dari {{ number_format(count($report->detailRows),0,',','.') }} baris data mentah.@endif</div>
+        </div>
+        <div class="d-flex flex-wrap gap-1">
+            @foreach($groupFields as $field)<span class="badge text-bg-light border text-dark">{{ $groupFieldOptions[$field] ?? $field }}</span>@endforeach
+        </div>
+    </div>
+    @if($groupFields === [])
+    <div class="table-shell">
+        <table class="table table-bordered table-hover group-table" data-sortable-stock>
+            <thead><tr><th data-sort-type="text">Database</th><th data-sort-type="text">Gudang</th><th data-sort-type="text">Item Code</th><th data-sort-type="text">Nama Item</th><th data-sort-type="text">Brand</th><th data-sort-type="number">Umur Stok</th><th data-sort-type="text">Status</th><th data-sort-type="number" class="text-end">Qty</th><th data-sort-type="number" class="text-end">Harga</th><th data-sort-type="number" class="text-end">Sisa Stok</th><th data-sort-type="number" class="text-end">Sales MTD</th></tr></thead>
+            <tbody>
+                @forelse($report->detailRows as $row)
+                <tr>
+                    <td>{{ $row['database'] ?? '-' }}</td><td>{{ $row['warehouse_name'] ?? $row['warehouse_code'] ?? '-' }}</td>
+                    <td class="fw-bold">{{ $row['item_code'] ?? '-' }}</td><td>{{ $row['item_name'] ?? '-' }}</td><td>{{ $row['brand'] ?? '-' }}</td>
+                    <td>{{ $row['age'] ?? 0 }} hari</td><td>{{ $row['status_label'] ?? '-' }}</td>
+                    <td class="number">{{ $qty($row['qty'] ?? 0) }}</td><td class="number">{{ $money($row['price'] ?? 0) }}</td>
+                    <td class="number fw-bold">{{ $money($row['sisa_stock'] ?? 0) }}</td><td class="number">{{ $money($row['sales_mtd'] ?? 0) }}</td>
+                </tr>
+                @empty
+                <tr><td colspan="11" class="text-center text-secondary py-5">Tidak ada data untuk filter ini.</td></tr>
+                @endforelse
+            </tbody>
+        </table>
+    </div>
+    @else
+    <div class="table-shell">
+        <table class="table table-bordered table-hover group-table" data-sortable-stock>
+            <thead>
+                <tr>
+                    @foreach($groupFields as $field)<th data-sort-type="text">{{ $groupFieldOptions[$field] ?? $field }}</th>@endforeach
+                    <th data-sort-type="number" class="text-end">Item</th>
+                    <th data-sort-type="number" class="text-end">Rows</th>
+                    <th data-sort-type="number" class="text-end">Qty Sisa</th>
+                    <th data-sort-type="number" class="text-end">Sisa Stok</th>
+                    <th data-sort-type="number" class="text-end">Sales MTD</th>
+                    <th data-sort-type="number" class="text-end">Sales / Stok</th>
+                </tr>
+            </thead>
+            <tbody>
+                @forelse($groupedRows as $row)
+                    <tr>
+                        @foreach($groupFields as $field)<td class="group-value">{{ $row['values'][$field] ?? '—' }}</td>@endforeach
+                        <td class="number">{{ number_format($row['item_count'],0,',','.') }}</td>
+                        <td class="number">{{ number_format($row['row_count'],0,',','.') }}</td>
+                        <td class="number">{{ $qty($row['qty']) }}</td>
+                        <td class="number fw-bold">{{ $money($row['sisa_stock']) }}</td>
+                        <td class="number">{{ $money($row['sales_mtd']) }}</td>
+                        <td class="number {{ $row['ratio'] !== null && $row['ratio'] < 10 ? 'ratio-low' : '' }}">{{ $ratio($row['ratio']) }}</td>
+                    </tr>
+                @empty
+                    <tr><td colspan="{{ count($groupFields)+6 }}" class="text-center text-secondary py-5">Tidak ada data untuk filter ini.</td></tr>
+                @endforelse
+            </tbody>
+        </table>
+    </div>
+    @endif
+</div>
+@endsection
+
+@push('scripts')
+<script>
+(function () {
+
+    // Client-side sorting: no extra SQL queries when a column header is clicked.
+    document.querySelectorAll('table[data-sortable-stock]').forEach(function (table) {
+        const tbody = table.tBodies[0];
+        if (!tbody) return;
+        const headers = Array.from(table.tHead?.rows[0]?.cells || []);
+        const parseNumber = function (text) {
+            const value = String(text || '').replace(/[^0-9,.-]/g, '').trim();
+            if (!value || value === '—') return null;
+            // UI formats numeric data in Indonesian locale (e.g. 1.234,50).
+            const num = Number(value.replace(/\./g, '').replace(',', '.'));
+            return Number.isFinite(num) ? num : null;
+        };
+        headers.forEach(function (header, index) {
+            const type = header.dataset.sortType;
+            if (!type) return;
+            header.tabIndex = 0;
+            header.setAttribute('role', 'button');
+            header.setAttribute('aria-label', 'Urutkan berdasarkan ' + header.textContent.trim());
+            const sort = function () {
+                const direction = header.getAttribute('aria-sort') === 'ascending' ? 'descending' : 'ascending';
+                const multiplier = direction === 'ascending' ? 1 : -1;
+                headers.forEach(function (h) { h.removeAttribute('aria-sort'); });
+                header.setAttribute('aria-sort', direction);
+                const rows = Array.from(tbody.rows).filter(function (r) { return r.cells.length === headers.length; });
+                rows.sort(function (a, b) {
+                    const aText = a.cells[index].textContent.trim();
+                    const bText = b.cells[index].textContent.trim();
+                    if (type === 'number') {
+                        const av = parseNumber(aText);
+                        const bv = parseNumber(bText);
+                        if (av === null && bv === null) return 0;
+                        if (av === null) return 1;
+                        if (bv === null) return -1;
+                        return multiplier * (av - bv);
+                    }
+                    return multiplier * aText.localeCompare(bText, 'id', {numeric:true, sensitivity:'base'});
+                });
+                rows.forEach(function (row) { tbody.appendChild(row); });
+            };
+            header.addEventListener('click', sort);
+            header.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); sort(); }
+            });
+        });
+    });
+
+    // Merge the two legacy sidebar entries on this consolidated page.
+    const strategyLink = document.querySelector('.app-sidebar a[href="{{ route('stock-aging.strategy-review') }}"]');
+    strategyLink?.remove();
+    const stockLink = document.querySelector('.app-sidebar a[href="{{ route('stock-aging.index') }}"]');
+    if (stockLink) {
+        stockLink.title = 'Stock & Aging Review';
+        const label = stockLink.querySelector('.nav-label');
+        if (label) label.textContent = 'Stock & Aging Review';
+    }
+
+    const list = document.getElementById('groupChipList');
+    const hidden = document.getElementById('groupHiddenInputs');
+    const select = document.getElementById('groupFieldSelect');
+    const add = document.getElementById('addGroupBtn');
+    if (!list || !hidden || !select || !add) return;
+
+    const labels = @json($groupFieldOptions);
+
+    function syncInputs() {
+        const emptyLabel = document.getElementById('groupEmptyLabel');
+        if (emptyLabel) emptyLabel.hidden = list.querySelectorAll('.group-chip').length > 0;
+        hidden.innerHTML = '';
+        list.querySelectorAll('.group-chip').forEach(function (chip) {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'group_by[]';
+            input.value = chip.dataset.field || '';
+            hidden.appendChild(input);
+        });
+    }
+
+    function bindChip(chip) {
+        chip.querySelector('.remove-group')?.addEventListener('click', function () {
+            chip.remove();
+            syncInputs();
+        });
+        chip.addEventListener('dragstart', function () { chip.classList.add('dragging'); });
+        chip.addEventListener('dragend', function () { chip.classList.remove('dragging'); syncInputs(); });
+    }
+
+    list.querySelectorAll('.group-chip').forEach(bindChip);
+
+    list.addEventListener('dragover', function (event) {
+        event.preventDefault();
+        const dragging = list.querySelector('.dragging');
+        if (!dragging) return;
+        const siblings = [...list.querySelectorAll('.group-chip:not(.dragging)')];
+        const next = siblings.find(function (item) {
+            const box = item.getBoundingClientRect();
+            return event.clientX < box.left + box.width / 2 && event.clientY <= box.bottom;
+        });
+        if (next) list.insertBefore(dragging, next); else list.appendChild(dragging);
+    });
+
+    add.addEventListener('click', function () {
+        const field = select.value;
+        if (!field || list.querySelector('[data-field="'+field+'"]')) return;
+        const chip = document.createElement('div');
+        chip.className = 'group-chip';
+        chip.draggable = true;
+        chip.dataset.field = field;
+        chip.innerHTML = '<i class="bi bi-grip-vertical text-secondary"></i><span></span><button type="button" class="remove-group" title="Hapus group">×</button>';
+        chip.querySelector('span').textContent = labels[field] || field;
+        list.appendChild(chip);
+        bindChip(chip);
+        syncInputs();
+    });
+
+    syncInputs();
+})();
+</script>
+@endpush

@@ -1,0 +1,1 @@
+<div class="kpi-table-pagination"><button type="button" class="btn btn-sm btn-outline-secondary" data-kpi-table-prev>Sebelumnya</button><button type="button" class="btn btn-sm btn-outline-secondary" data-kpi-table-next>Berikutnya</button></div>

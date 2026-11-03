@@ -1,0 +1,67 @@
+(function(){
+    const root=document.querySelector('[data-product-advisor-chat]');
+    const cfg=window.productStrategyAdvisorConfig;
+    if(!root||!cfg)return;
+    const question=root.querySelector('[data-advisor-question]');
+    const button=root.querySelector('[data-advisor-submit]');
+    const answer=root.querySelector('[data-advisor-answer]');
+    const error=root.querySelector('[data-advisor-error]');
+    const node=(tag,className,text)=>{const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el;};
+    const section=(label,items,render)=>{
+        if(!Array.isArray(items)||items.length===0)return;
+        const wrap=node('div','pa-answer-section');wrap.appendChild(node('div','fw-bold mb-2',label));
+        items.forEach((item)=>wrap.appendChild(render(item)));answer.appendChild(wrap);
+    };
+    const renderResponse=(data)=>{
+        answer.replaceChildren();
+        const summary=node('div','pa-answer-section');summary.appendChild(node('div','fw-bold','RINGKASAN · '+String(data.mode||'')));summary.appendChild(node('div','mt-1',String(data.summary||'')));answer.appendChild(summary);
+        section('FAKTA',data.facts,(x)=>node('div','small border-bottom py-1',String(x.text||'')));
+        section('KESIMPULAN',data.inferences,(x)=>node('div','small border-bottom py-1',String(x.text||'')+' · '+String(x.confidence||'')));
+        section('SARAN TINDAKAN',data.recommendations,(x)=>{const w=node('div','border-bottom py-2');w.appendChild(node('div','fw-bold small',String(x.title||'')+' · '+String(x.channel||'')));w.appendChild(node('div','small',String(x.action||'')));w.appendChild(node('div','text-secondary small','Kenapa: '+String(x.why||'')));return w;});
+        section('TES PENJUALAN',data.experiments,(x)=>{const w=node('div','border-bottom py-2');w.appendChild(node('div','fw-bold small',String(x.title||'')));w.appendChild(node('div','small','Target: '+String(x.target_audience||'')));w.appendChild(node('div','small','Tawarkan: '+String(x.offer||'')));w.appendChild(node('div','small','Berhasil jika: '+String(x.success_rule||'')));w.appendChild(node('div','text-secondary small','Ubah / hentikan jika: '+String(x.stop_rule||'')));return w;});
+        section('INFO YANG MASIH KURANG',data.missing_information,(x)=>node('div','small border-bottom py-1',String(x)));
+        section('SUMBER INTERNET',data.external_sources,(x)=>{const a=node('a','pa-source',String(x.title||x.url||''));a.href=String(x.url||'#');a.target='_blank';a.rel='noopener noreferrer';return a;});
+        if(data.warning){const warn=node('div','alert alert-warning py-2 small',String(data.warning));answer.prepend(warn);}
+    };
+    button.addEventListener('click',async()=>{
+        const text=question.value.trim();if(text.length<3){error.textContent='Masukkan pertanyaan minimal 3 karakter.';error.classList.remove('d-none');return;}
+        error.classList.add('d-none');button.disabled=true;button.textContent='Menyusun saran…';answer.replaceChildren(node('div','pa-answer-section text-secondary','Membaca data dan menyusun tindakan yang bisa dicoba…'));
+        try{
+            const form=new FormData();form.append('_token',cfg.csrf);form.append('review_id',String(cfg.reviewId));form.append('question',text);
+            const res=await fetch(cfg.askEndpoint,{method:'POST',body:form,headers:{'Accept':'application/json'}});const json=await res.json();if(!res.ok)throw new Error(json.message||'Advisor request gagal.');renderResponse(json.data||{});
+        }catch(e){error.textContent=e instanceof Error?e.message:'Advisor request gagal.';error.classList.remove('d-none');answer.replaceChildren();}
+        finally{button.disabled=false;button.textContent='Minta Saran';}
+    });
+})();
+
+(function(){
+    const form=document.querySelector('[data-experiment-form]');
+    const buttons=document.querySelectorAll('[data-use-strategy]');
+    if(!form||buttons.length===0)return;
+    const field=(name)=>form.querySelector(`[name="${name}"]`);
+    const dateText=(date)=>{
+        const y=date.getFullYear();
+        const m=String(date.getMonth()+1).padStart(2,'0');
+        const d=String(date.getDate()).padStart(2,'0');
+        return `${y}-${m}-${d}`;
+    };
+    buttons.forEach((button)=>button.addEventListener('click',()=>{
+        let data={};
+        try{data=JSON.parse(button.dataset.strategy||'{}');}catch(_){return;}
+        if(field('title'))field('title').value=String(data.title||'');
+        if(field('channel'))field('channel').value=['ONLINE','OFFLINE','OMNICHANNEL'].includes(String(data.channel||''))?String(data.channel):'OMNICHANNEL';
+        if(field('hypothesis'))field('hypothesis').value=String(data.hypothesis||'');
+        if(field('target_audience'))field('target_audience').value=String(data.audience||'');
+        if(field('offer_description'))field('offer_description').value=String(data.offer||'');
+        if(field('revenue_uplift_min'))field('revenue_uplift_min').value=String(data.revenue_min??0.10);
+        if(field('quantity_uplift_min'))field('quantity_uplift_min').value=String(data.qty_min??0.05);
+        if(field('stop_rule'))field('stop_rule').value=String(data.stop_rule||'');
+        const duration=Math.max(1,Math.min(90,Number(data.duration)||14));
+        const start=new Date();
+        const end=new Date(start.getFullYear(),start.getMonth(),start.getDate()+duration-1);
+        if(field('start_date'))field('start_date').value=dateText(start);
+        if(field('end_date'))field('end_date').value=dateText(end);
+        form.scrollIntoView({behavior:'smooth',block:'start'});
+        const title=field('title');if(title)title.focus();
+    }));
+})();

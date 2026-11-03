@@ -1,0 +1,87 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Exports;
+
+use Maatwebsite\Excel\Concerns\FromArray;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
+use Maatwebsite\Excel\Concerns\WithColumnFormatting;
+use Maatwebsite\Excel\Concerns\WithStyles;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+
+final class StockAgingRawExport implements FromArray, ShouldAutoSize, WithColumnFormatting, WithStyles
+{
+    /** @param list<array<string,mixed>> $rows */
+    public function __construct(private readonly array $rows)
+    {
+    }
+
+    /** @return list<list<mixed>> */
+    public function array(): array
+    {
+        $data = [[
+            'Database', 'Brand', 'Warehouse ID', 'Warehouse Code', 'Warehouse Name',
+            'Item ID', 'Item Code', 'Item Name', 'Product Focus', 'Age (Hari)', 'Age Bucket',
+            'Qty Sisa', 'Price KHUSUS-1', 'Sisa Stok', 'Sales MTD', 'Status Item',
+            'Master Discontinue', 'Ada SBS_DiscountRules', 'Item Reject',
+        ]];
+
+        foreach ($this->rows as $row) {
+            $data[] = [
+                (string) ($row['database'] ?? $row['source'] ?? ''),
+                (string) ($row['brand'] ?? ''),
+                (int) ($row['warehouse_id'] ?? 0),
+                (string) ($row['warehouse_code'] ?? ''),
+                (string) ($row['warehouse_name'] ?? ''),
+                (int) ($row['item_id'] ?? 0),
+                (string) ($row['item_code'] ?? ''),
+                (string) ($row['item_name'] ?? ''),
+                (string) ($row['product_focus'] ?? 'NON FOCUS'),
+                (int) ($row['age'] ?? 0),
+                (string) ($row['bucket_label'] ?? ''),
+                (float) ($row['qty'] ?? 0),
+                (float) ($row['price'] ?? 0),
+                (float) ($row['sisa_stock'] ?? 0),
+                (float) ($row['sales_mtd'] ?? 0),
+                (string) ($row['status_label'] ?? ''),
+                (bool) ($row['discontinued'] ?? false) ? 'YA' : 'TIDAK',
+                (bool) ($row['has_discount_rule'] ?? false) ? 'YA' : 'TIDAK',
+                (bool) ($row['item_reject'] ?? false) ? 'YA' : 'TIDAK',
+            ];
+        }
+
+        return $data;
+    }
+
+    /** @return array<string,string> */
+    public function columnFormats(): array
+    {
+        return [
+            'L' => '#,##0.00',
+            'M' => '#,##0.00',
+            'N' => '#,##0.00',
+            'O' => '#,##0.00',
+        ];
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    public function styles(Worksheet $sheet): array
+    {
+        $lastRow = max(1, count($this->rows) + 1);
+        $sheet->freezePane('A2');
+        $sheet->setAutoFilter('A1:S'.$lastRow);
+        $sheet->getStyle('A1:S'.$lastRow)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getStyle('A1:S'.$lastRow)->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+
+        return [
+            1 => [
+                'font' => ['bold' => true, 'color' => ['rgb' => '111111']],
+                'fill' => ['fillType' => 'solid', 'startColor' => ['rgb' => 'FFC000']],
+                'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+            ],
+        ];
+    }
+}

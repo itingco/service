@@ -1,0 +1,52 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\BusinessAnalytics;
+
+use Throwable;
+
+final class InteractiveStrategyAdvisorService
+{
+    public function __construct(
+        private readonly AdvisorProviderFactory $factory,
+        private readonly AdvisorContextSanitizer $sanitizer,
+        private readonly AdvisorResponseValidator $validator,
+        private readonly ProductStrategyService $strategy,
+        private readonly AdvisorPlainLanguageService $plainLanguage,
+    ) {}
+
+    /** @param array<string,mixed> $facts @param array<string,mixed>|null $research @param list<array<string,mixed>> $memory @return array<string,mixed> */
+    public function ask(array $facts, ?array $research, array $memory, string $question): array
+    {
+        $deterministic=$this->strategy->build($facts,(array)($research['segments']??[]),$memory);
+        $fallback=$this->fallback($facts,$research,$deterministic,$question);
+        $provider=$this->factory->advisor();
+        if($provider->name()==='disabled')return $this->plainLanguage->response([...$fallback,'provider'=>'disabled','model'=>null,'mode'=>'DETERMINISTIC']);
+        try{
+            $context=$this->sanitizer->sanitize(['facts'=>$facts,'external_research'=>$research,'strategy_memory'=>$memory,'deterministic_strategy'=>$deterministic]);
+            $response=$this->validator->validate($provider->synthesize($context,$question));
+            $response['facts']=$fallback['facts'];
+            $response['external_sources']=(array)($research['sources']??$response['external_sources']??[]);
+            return $this->plainLanguage->response([...$response,'provider'=>$provider->name(),'model'=>$provider->model(),'mode'=>'HYBRID']);
+        }catch(Throwable $e){
+            report($e);
+            return $this->plainLanguage->response([...$fallback,'provider'=>$provider->name(),'model'=>$provider->model(),'mode'=>'DEGRADED','warning'=>'AI advisor gagal; saran internal tetap digunakan.']);
+        }
+    }
+
+    /** @param array<string,mixed> $facts @param array<string,mixed>|null $research @param array<string,mixed> $strategy @return array<string,mixed> */
+    private function fallback(array $facts,?array $research,array $strategy,string $question): array
+    {
+        $factRows=[];foreach([['Sales 3M',$facts['sales_3m']??0],['3M Momentum',$facts['momentum_3m']??null],['YoY Growth',$facts['yoy_growth']??null],['Online Share',$facts['online_share']??null],['Lost Revenue',$facts['lost_revenue']??0]] as[$label,$value])$factRows[]=['text'=>$label.': '.(is_float($value)?(string)round($value,4):(string)$value),'source'=>'INTERNAL'];
+        $inferences=[];foreach((array)($facts['diagnosis']['inferences']??[]) as$i)$inferences[]=['text'=>(string)($i['text']??''),'confidence'=>(string)($i['confidence']??'MEDIUM')];
+        $recommendations=[];$experiments=[];foreach((array)($strategy['strategies']??[]) as$s){$recommendations[]=['title'=>$s['title'],'channel'=>$s['channel'],'why'=>implode(' · ',(array)($s['evidence']??[])),'action'=>$s['offer'],'priority'=>$s['priority']];$experiments[]=['title'=>$s['title'],'hypothesis'=>$s['hypothesis'],'target_audience'=>$s['target_audience'],'channel'=>$s['channel'],'offer'=>$s['offer'],'duration_days'=>$s['duration_days'],'kpis'=>$s['kpis'],'success_rule'=>'Revenue uplift ≥ '.round((float)($s['success_threshold']['revenue_uplift_min']??.1)*100,0).'% dan quantity uplift ≥ '.round((float)($s['success_threshold']['quantity_uplift_min']??.05)*100,0).'%','stop_rule'=>$s['stop_rule']];}
+        return ['summary'=>'Saran untuk: '.$question,'facts'=>$factRows,'inferences'=>$inferences,'market_opportunities'=>(array)($research['segments']??[]),'recommendations'=>$recommendations,'experiments'=>$experiments,'risks'=>[],'missing_information'=>$this->missing($facts),'external_sources'=>(array)($research['sources']??[])];
+    }
+
+    /** @param array<string,mixed> $facts @return list<string> */
+    private function missing(array $facts): array
+    {
+        $p=(array)($facts['profile']??[]);$missing=[];if(trim((string)($p['specifications']??''))==='')$missing[]='Spesifikasi produk belum diisi.';if(($p['current_stock']??null)===null)$missing[]='Stock saat ini belum diisi.';if(($p['target_margin_percent']??null)===null)$missing[]='Target margin belum diisi; rekomendasi promo belum bisa dinilai dari sisi profit.';return $missing;
+    }
+}

@@ -1,0 +1,134 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Data\BusinessAnalytics;
+
+use DateTimeImmutable;
+use InvalidArgumentException;
+
+final class BusinessAnalyticsFilter
+{
+    private const SOURCES = ['all', 'ingco', 'smi'];
+    private const LEVELS = ['company', 'line', 'customer', 'salesperson', 'item'];
+
+    public function __construct(
+        public readonly string $database,
+        public readonly string $endMonth,
+        public readonly string $groupBy,
+        public readonly ?string $source,
+        public readonly ?string $line,
+        public readonly ?string $customerCode,
+        public readonly ?string $salesperson,
+    ) {
+    }
+
+    public static function from(array $input): self
+    {
+        $database = strtolower(trim((string) ($input['database'] ?? 'all')));
+        if (!in_array($database, self::SOURCES, true)) {
+            throw new InvalidArgumentException('Database analytics tidak valid.');
+        }
+
+        $endMonth = trim((string) ($input['end_month'] ?? date('Y-m')));
+        $date = DateTimeImmutable::createFromFormat('!Y-m', $endMonth);
+        if ($date === false || $date->format('Y-m') !== $endMonth) {
+            throw new InvalidArgumentException('Periode analytics harus YYYY-MM.');
+        }
+
+        $groupBy = strtolower(trim((string) ($input['group_by'] ?? ($database === 'all' ? 'company' : 'line'))));
+        if (!in_array($groupBy, self::LEVELS, true)) {
+            throw new InvalidArgumentException('Level drill-down analytics tidak valid.');
+        }
+
+        $source = self::clean($input['source'] ?? null);
+        if ($source !== null) {
+            $source = strtoupper($source);
+            if (!in_array($source, ['INGCO', 'SMI'], true)) {
+                throw new InvalidArgumentException('Source analytics tidak valid.');
+            }
+            if (($database === 'ingco' && $source !== 'INGCO') || ($database === 'smi' && $source !== 'SMI')) {
+                throw new InvalidArgumentException('Source tidak sesuai dengan database yang dipilih.');
+            }
+        }
+
+        return new self(
+            database: $database,
+            endMonth: $endMonth,
+            groupBy: $groupBy,
+            source: $source,
+            line: self::clean($input['line'] ?? null),
+            customerCode: self::clean($input['customer_code'] ?? null),
+            salesperson: self::clean($input['salesperson'] ?? null),
+        );
+    }
+
+    /** @return list<string> */
+    public function sources(): array
+    {
+        if ($this->source !== null) {
+            return [$this->source];
+        }
+
+        return match ($this->database) {
+            'ingco' => ['INGCO'],
+            'smi' => ['SMI'],
+            default => ['INGCO', 'SMI'],
+        };
+    }
+
+    public function nextLevel(): ?string
+    {
+        return match ($this->groupBy) {
+            'company' => 'line',
+            'line' => 'customer',
+            'customer' => 'salesperson',
+            'salesperson' => 'item',
+            default => null,
+        };
+    }
+
+    /** @param array<string,mixed> $baseQuery @return array<string,mixed> */
+    public function drillQuery(array $baseQuery, string $key): array
+    {
+        $nextLevel = $this->nextLevel();
+        if ($nextLevel === null) {
+            return $baseQuery;
+        }
+
+        $baseQuery['group_by'] = $nextLevel;
+
+        switch ($this->groupBy) {
+            case 'company':
+                $baseQuery['source'] = strtoupper($key);
+                break;
+            case 'line':
+                $baseQuery['line'] = $key;
+                break;
+            case 'customer':
+                $baseQuery['customer_code'] = $key;
+                break;
+            case 'salesperson':
+                $baseQuery['salesperson'] = $key;
+                break;
+        }
+
+        return $baseQuery;
+    }
+
+    public function label(): string
+    {
+        $parts = [$this->database === 'all' ? 'INGCO & SMI' : strtoupper($this->database)];
+        if ($this->source !== null) $parts[] = $this->source;
+        if ($this->line !== null) $parts[] = $this->line;
+        if ($this->customerCode !== null) $parts[] = 'Customer '.$this->customerCode;
+        if ($this->salesperson !== null) $parts[] = $this->salesperson;
+        return implode(' / ', $parts);
+    }
+
+    private static function clean(mixed $value): ?string
+    {
+        $text = trim((string) ($value ?? ''));
+        return $text === '' ? null : $text;
+    }
+}

@@ -1,0 +1,114 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\BusinessAnalytics\Providers;
+
+use App\Contracts\BusinessAnalytics\AdvisorSynthesisProvider;
+use App\Contracts\BusinessAnalytics\MarketResearchProvider;
+use App\Services\BusinessAnalytics\OpenAIRequestBuilder;
+use Illuminate\Support\Facades\Http;
+use RuntimeException;
+
+final class OpenAIAdvisorProvider implements MarketResearchProvider, AdvisorSynthesisProvider
+{
+    public function __construct(
+        private readonly string $apiKey,
+        private readonly string $modelName,
+        private readonly int $timeoutSeconds = 45,
+        private readonly bool $webResearch = true,
+    ) {}
+
+    public function name(): string { return 'openai'; }
+    public function model(): ?string { return $this->modelName; }
+
+    public function research(array $context): array
+    {
+        if (!$this->webResearch) {
+            return ['status'=>'DISABLED','summary'=>'Web research dinonaktifkan melalui konfigurasi.','segments'=>[],'sources'=>[]];
+        }
+        $product = [
+            'item_code'=>$context['item_code']??null,
+            'item_name'=>$context['item_name']??null,
+            'specifications'=>$context['profile']['specifications']??$context['specifications']??null,
+            'use_cases'=>$context['profile']['use_cases']??$context['use_cases']??null,
+            'advantages'=>$context['profile']['advantages']??$context['advantages']??null,
+        ];
+        $input = "Research public market applications and buyer sectors for this product. Focus on Indonesia when useful. Use simple Bahasa Indonesia. Keep every explanation short and practical: target, why it fits, how to offer it, and one simple action to test. Avoid consultant jargon and long sentences. Do not invent company sales facts. Return JSON matching the supplied schema. Product:\n".json_encode($product, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        $payload = (new OpenAIRequestBuilder($this->modelName, $this->webResearch))
+            ->research($input, $this->researchSchema());
+        $response = $this->call($payload);
+        $parsed = $this->decodeOutput($response);
+        $sources = $this->collectSources($response);
+        foreach ((array)($parsed['sources']??[]) as $source) {
+            if (is_array($source) && filter_var($source['url']??'', FILTER_VALIDATE_URL)) $sources[]=['title'=>(string)($source['title']??$source['url']),'url'=>(string)$source['url']];
+        }
+        $sources = $this->uniqueSources($sources);
+        $segments=[];
+        foreach((array)($parsed['segments']??[]) as $segment){
+            if(!is_array($segment)||trim((string)($segment['segment']??''))==='')continue;
+            $segment['source_count']=count(array_filter((array)($segment['source_urls']??[]),static fn($u):bool=>filter_var($u,FILTER_VALIDATE_URL)!==false));
+            $segments[]=$segment;
+        }
+        return ['status'=>'SUCCESS','summary'=>(string)($parsed['summary']??''),'segments'=>$segments,'sources'=>$sources];
+    }
+
+    public function synthesize(array $context, string $question): array
+    {
+        $input = "You are a practical sales manager. Answer in simple Bahasa Indonesia that staff can understand in seconds. Use short sentences and direct actions. Avoid jargon such as penetration, exposure, value proposition, cohort, uplift, outreach, scale, and baseline when a simple Indonesian phrase works. Internal numeric facts in CONTEXT are authoritative and must not be changed. Clearly separate fact, inference, recommendation, and experiments. Each recommendation should say: target, why, action, and what to measure. Do not claim CTR/CPC/ROAS unless supplied. Do not claim causality without control data. Return JSON matching schema.\nQUESTION:\n{$question}\nCONTEXT:\n".json_encode($context, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        $payload = (new OpenAIRequestBuilder($this->modelName, false))
+            ->advisor($input, $this->advisorSchema());
+        return $this->decodeOutput($this->call($payload));
+    }
+
+    /** @param array<string,mixed> $payload @return array<string,mixed> */
+    private function call(array $payload): array
+    {
+        if (trim($this->apiKey)==='') throw new RuntimeException('BUSINESS_ADVISOR_API_KEY belum diatur.');
+        $response = Http::withToken($this->apiKey)->acceptJson()->asJson()->timeout(max(10,$this->timeoutSeconds))->post('https://api.openai.com/v1/responses',$payload);
+        if (!$response->successful()) throw new RuntimeException('OpenAI advisor request gagal HTTP '.$response->status().': '.mb_substr($response->body(),0,800));
+        $json=$response->json(); if(!is_array($json))throw new RuntimeException('OpenAI advisor response bukan JSON object.'); return $json;
+    }
+
+    /** @param array<string,mixed> $response @return array<string,mixed> */
+    private function decodeOutput(array $response): array
+    {
+        $text=isset($response['output_text'])&&is_string($response['output_text'])?$response['output_text']:'';
+        if($text==='')foreach((array)($response['output']??[]) as$item){if(!is_array($item)||($item['type']??'')!=='message')continue;foreach((array)($item['content']??[]) as$content){if(is_array($content)&&($content['type']??'')==='output_text'){$text.=(string)($content['text']??'');}}}
+        $decoded=json_decode($text,true); if(!is_array($decoded))throw new RuntimeException('Structured advisor output tidak dapat diparse.'); return $decoded;
+    }
+
+    /** @param array<string,mixed> $node @return list<array{title:string,url:string}> */
+    private function collectSources(array $node): array
+    {
+        $out=[]; $walk=function(mixed $v)use(&$walk,&$out):void{if(!is_array($v))return;if(isset($v['url'])&&is_string($v['url'])&&filter_var($v['url'],FILTER_VALIDATE_URL))$out[]=['title'=>(string)($v['title']??$v['url']),'url'=>$v['url']];foreach($v as$child)$walk($child);};$walk($node);return $this->uniqueSources($out);
+    }
+    /** @param list<array{title:string,url:string}> $sources @return list<array{title:string,url:string}> */
+    private function uniqueSources(array $sources): array { $seen=[];$out=[];foreach($sources as$s){$u=(string)$s['url'];if(isset($seen[$u]))continue;$seen[$u]=true;$out[]=$s;}return array_slice($out,0,20); }
+
+    /** @return array<string,mixed> */
+    private function researchSchema(): array
+    {
+        return ['type'=>'object','properties'=>[
+            'summary'=>['type'=>'string'],
+            'segments'=>['type'=>'array','items'=>['type'=>'object','properties'=>[
+                'segment'=>['type'=>'string'],'fit_hint'=>['type'=>'number','minimum'=>0,'maximum'=>1],'why'=>['type'=>'string'],'buyer_problem'=>['type'=>'string'],'selling_angle'=>['type'=>'string'],'preferred_channel'=>['type'=>'string','enum'=>['ONLINE','OFFLINE','OMNICHANNEL']],'first_test'=>['type'=>'string'],'source_urls'=>['type'=>'array','items'=>['type'=>'string']],
+            ],'required'=>['segment','fit_hint','why','buyer_problem','selling_angle','preferred_channel','first_test','source_urls'],'additionalProperties'=>false]],
+            'sources'=>['type'=>'array','items'=>['type'=>'object','properties'=>['title'=>['type'=>'string'],'url'=>['type'=>'string']],'required'=>['title','url'],'additionalProperties'=>false]],
+        ],'required'=>['summary','segments','sources'],'additionalProperties'=>false];
+    }
+
+    /** @return array<string,mixed> */
+    private function advisorSchema(): array
+    {
+        $textItem=['type'=>'object','properties'=>['text'=>['type'=>'string'],'source'=>['type'=>'string']],'required'=>['text','source'],'additionalProperties'=>false];
+        $inference=['type'=>'object','properties'=>['text'=>['type'=>'string'],'confidence'=>['type'=>'string','enum'=>['LOW','MEDIUM','HIGH']]],'required'=>['text','confidence'],'additionalProperties'=>false];
+        $rec=['type'=>'object','properties'=>['title'=>['type'=>'string'],'channel'=>['type'=>'string'],'why'=>['type'=>'string'],'action'=>['type'=>'string'],'priority'=>['type'=>'string','enum'=>['LOW','MEDIUM','HIGH']]],'required'=>['title','channel','why','action','priority'],'additionalProperties'=>false];
+        $exp=['type'=>'object','properties'=>['title'=>['type'=>'string'],'hypothesis'=>['type'=>'string'],'target_audience'=>['type'=>'string'],'channel'=>['type'=>'string'],'offer'=>['type'=>'string'],'duration_days'=>['type'=>'integer'],'kpis'=>['type'=>'array','items'=>['type'=>'string']],'success_rule'=>['type'=>'string'],'stop_rule'=>['type'=>'string']],'required'=>['title','hypothesis','target_audience','channel','offer','duration_days','kpis','success_rule','stop_rule'],'additionalProperties'=>false];
+        $market=['type'=>'object','properties'=>['segment'=>['type'=>'string'],'fit_score'=>['type'=>'integer'],'why'=>['type'=>'string'],'preferred_channel'=>['type'=>'string']],'required'=>['segment','fit_score','why','preferred_channel'],'additionalProperties'=>false];
+        $source=['type'=>'object','properties'=>['title'=>['type'=>'string'],'url'=>['type'=>'string']],'required'=>['title','url'],'additionalProperties'=>false];
+        return ['type'=>'object','properties'=>[
+            'summary'=>['type'=>'string'],'facts'=>['type'=>'array','items'=>$textItem],'inferences'=>['type'=>'array','items'=>$inference],'market_opportunities'=>['type'=>'array','items'=>$market],'recommendations'=>['type'=>'array','items'=>$rec],'experiments'=>['type'=>'array','items'=>$exp],'risks'=>['type'=>'array','items'=>$textItem],'missing_information'=>['type'=>'array','items'=>['type'=>'string']],'external_sources'=>['type'=>'array','items'=>$source],
+        ],'required'=>['summary','facts','inferences','market_opportunities','recommendations','experiments','risks','missing_information','external_sources'],'additionalProperties'=>false];
+    }
+}

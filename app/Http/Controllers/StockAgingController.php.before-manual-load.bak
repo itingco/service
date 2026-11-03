@@ -1,0 +1,251 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers;
+
+use App\Data\StockAgingReport;
+use App\Exceptions\StockAgingDataException;
+use App\Exports\StockAgingDetailExport;
+use App\Exports\StockAgingRawExport;
+use App\Http\Requests\StockAgingDetailRequest;
+use App\Http\Requests\StockAgingRequest;
+use App\Services\ProductStrategy\ProductStrategyCatalogRepository;
+use App\Services\StockAgingAggregator;
+use App\Services\StockAgingDetailQueryService;
+use App\Services\StockAgingGroupingService;
+use App\Services\StockAgingService;
+use App\Support\StockStrategyWarehouseSelection;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\View\View;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+
+final class StockAgingController extends Controller
+{
+    public function index(
+        StockAgingRequest $request,
+        StockAgingService $service,
+        StockAgingAggregator $aggregator,
+        ProductStrategyCatalogRepository $catalog,
+        StockAgingGroupingService $grouping,
+    ): View|BinaryFileResponse {
+        $filter = $request->filter();
+        $error = session('report_error');
+
+        try {
+            $baseReport = $service->generate($filter);
+        } catch (StockAgingDataException $exception) {
+            report($exception);
+            $baseReport = StockAgingReport::empty($filter);
+            $error = $this->friendlyError($exception);
+        }
+
+        $warehouseKeys = StockStrategyWarehouseSelection::normalize($request->query('warehouse', []));
+        $warehouseOptions = StockStrategyWarehouseSelection::optionsFromSources($baseReport->sources);
+        $rows = StockStrategyWarehouseSelection::filterRows($baseReport->detailRows, $warehouseKeys);
+        $warehouseCategoryService = app(\App\Services\WarehouseCategoryService::class);
+        $warehouseCategoryOptions = $warehouseCategoryService->categories();
+        $warehouseCategoryIds = array_values(array_unique(array_filter(array_map('intval', (array)$request->query('warehouse_category', [])), fn($id) => $id > 0)));
+        if ($warehouseCategoryIds !== []) {
+            $rows = $warehouseCategoryService->filterRows($rows, $warehouseCategoryIds);
+        }
+
+        try {
+            $focusMap = $catalog->focusMap();
+            $focusOptions = array_values(array_unique(array_map(
+                static fn (array $row): string => strtoupper((string) ($row['focus_category'] ?? '')),
+                $catalog->productFocusRows(),
+            )));
+            $focusOptions = array_values(array_filter($focusOptions, static fn (string $value): bool => $value !== ''));
+            sort($focusOptions);
+        } catch (\Throwable $exception) {
+            report($exception);
+            $focusMap = [];
+            $focusOptions = [];
+        }
+        if (!in_array('NON FOCUS', $focusOptions, true)) {
+            $focusOptions[] = 'NON FOCUS';
+        }
+
+        $rows = array_map(static function (array $row) use ($focusMap): array {
+            $code = strtoupper(trim((string) ($row['item_code'] ?? '')));
+            $row['product_focus'] = (string) ($focusMap[$code]['focus_category'] ?? 'NON FOCUS');
+            return $row;
+        }, $rows);
+
+        $focus = strtoupper(trim((string) $request->query('focus', '')));
+        if ($focus !== '') {
+            $rows = array_values(array_filter(
+                $rows,
+                static fn (array $row): bool => strtoupper((string) ($row['product_focus'] ?? 'NON FOCUS')) === $focus,
+            ));
+        }
+
+        $report = $aggregator->aggregate($filter, $rows);
+
+        if ($request->boolean('export_raw')) {
+            return Excel::download(
+                new StockAgingRawExport($report->detailRows),
+                'Stock_Aging_Raw_'.$filter->selectedDate->format('Y-m-d').'.xlsx',
+            );
+        }
+
+        $groupFields = $grouping->normalizeFields($request->query('group_by', []));
+        $groupFieldOptions = $grouping->fieldOptions();
+        $groupedRows = $groupFields === [] ? [] : $grouping->group($report->detailRows, $groupFields);
+
+        $exportQuery = $request->query();
+        unset($exportQuery['page']);
+        $exportQuery['export_raw'] = 1;
+
+        return view('stock-aging.index', compact(
+            'report',
+            'filter',
+            'error',
+            'warehouseKeys',
+            'warehouseOptions',
+            'warehouseCategoryOptions',
+            'warehouseCategoryIds',
+            'focus',
+            'focusOptions',
+            'groupFields',
+            'groupFieldOptions',
+            'groupedRows',
+            'exportQuery',
+        ));
+    }
+
+    public function details(
+        StockAgingDetailRequest $request,
+        StockAgingService $service,
+        StockAgingDetailQueryService $queryService,
+    ): View|RedirectResponse {
+        $filter = $request->filter();
+
+        try {
+            $report = $service->generate($filter);
+        } catch (StockAgingDataException $exception) {
+            report($exception);
+
+            return redirect()
+                ->route('stock-aging.index', $filter->query())
+                ->with('report_error', $this->friendlyError($exception));
+        }
+
+        $source = (string) $request->validated('source');
+        $warehouseId = (int) $request->validated('warehouse_id');
+        $bucket = (string) $request->validated('bucket');
+        $page = $queryService->paginate(
+            rows: $report->detailRows,
+            source: $source,
+            warehouseId: $warehouseId,
+            bucket: $bucket,
+            page: (int) $request->validated('page', 1),
+            perPage: (int) config('stock_aging.detail_per_page', 100),
+        );
+
+        $first = $page->items()[0] ?? null;
+        $warehouseName = is_array($first) ? (string) $first['warehouse_name'] : 'Warehouse '.$warehouseId;
+        $warehouseCode = is_array($first) ? (string) $first['warehouse_code'] : '';
+        $bucketLabel = is_array($first) ? (string) $first['bucket_label'] : $this->bucketLabel($bucket);
+
+        return view('stock-aging.details', compact(
+            'report',
+            'filter',
+            'page',
+            'source',
+            'warehouseId',
+            'warehouseName',
+            'warehouseCode',
+            'bucket',
+            'bucketLabel',
+        ));
+    }
+
+    public function exportDetailsExcel(
+        StockAgingDetailRequest $request,
+        StockAgingService $service,
+        StockAgingDetailQueryService $queryService,
+    ): BinaryFileResponse|RedirectResponse {
+        $filter = $request->filter();
+
+        try {
+            $report = $service->generate($filter);
+        } catch (StockAgingDataException $exception) {
+            report($exception);
+
+            return redirect()
+                ->route('stock-aging.index', $filter->query())
+                ->with('report_error', $this->friendlyError($exception));
+        }
+
+        $source = (string) $request->validated('source');
+        $warehouseId = (int) $request->validated('warehouse_id');
+        $bucket = (string) $request->validated('bucket');
+        $rows = $queryService->filterAll(
+            rows: $report->detailRows,
+            source: $source,
+            warehouseId: $warehouseId,
+            bucket: $bucket,
+        );
+
+        $first = $rows[0] ?? null;
+        $warehouseName = is_array($first) ? (string) $first['warehouse_name'] : 'Warehouse '.$warehouseId;
+        $warehouseCode = is_array($first) ? (string) $first['warehouse_code'] : '';
+        $bucketLabel = is_array($first) ? (string) $first['bucket_label'] : $this->bucketLabel($bucket);
+
+        return Excel::download(
+            new StockAgingDetailExport(
+                filter: $filter,
+                rows: $rows,
+                source: $source,
+                warehouseId: $warehouseId,
+                warehouseName: $warehouseName,
+                warehouseCode: $warehouseCode,
+                bucketLabel: $bucketLabel,
+            ),
+            sprintf(
+                'Stock_Aging_%s_%s_%s_%s.xlsx',
+                strtoupper($source),
+                $this->filenamePart($warehouseCode !== '' ? $warehouseCode : $warehouseName),
+                $this->filenamePart($bucket),
+                $filter->selectedDate->format('Y-m-d'),
+            ),
+        );
+    }
+
+    private function friendlyError(StockAgingDataException $exception): string
+    {
+        $sources = array_map(
+            static fn (string $source): string => strtoupper($source) === 'SMI' ? 'AS_SMI (SMI/WADFOW)' : 'AS_INGCO',
+            $exception->failedSources(),
+        );
+
+        if (str_starts_with($exception->getMessage(), 'Kolom ')
+            || str_contains($exception->getMessage(), 'fn_PenjualanLini')) {
+            return $exception->getMessage();
+        }
+
+        return 'Laporan Stock & Aging tidak dapat dimuat. Database '.implode(' dan ', $sources).' gagal dibaca. Data sumber lainnya tidak ditampilkan agar subtotal tidak menyesatkan.';
+    }
+
+    private function filenamePart(string $value): string
+    {
+        $value = preg_replace('/[^A-Za-z0-9_-]+/', '-', trim($value)) ?? '';
+        $value = trim($value, '-_');
+
+        return $value !== '' ? substr($value, 0, 60) : 'WAREHOUSE';
+    }
+
+    private function bucketLabel(string $bucket): string
+    {
+        return match ($bucket) {
+            '0-30' => '0-30 Hari',
+            '31-60' => '31-60 Hari',
+            '61-90' => '61-90 Hari',
+            '91-120' => '91-120 Hari',
+            default => '>120 Hari',
+        };
+    }
+}

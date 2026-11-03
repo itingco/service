@@ -1,0 +1,574 @@
+/* =========================================================
+   Mobile Responsive Patch V2
+   Laravel Sales Dashboard
+   Lokasi file: public/css/mobile-responsive.css
+
+   Cara pakai:
+   - Replace file lama public/css/mobile-responsive.css dengan file ini.
+   - Pastikan app.blade.php sudah load file ini.
+   ========================================================= */
+
+/* Global safety */
+html,
+body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden !important;
+    -webkit-text-size-adjust: 100%;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+img,
+svg,
+canvas {
+    max-width: 100%;
+}
+
+.page-shell,
+.container,
+.container-fluid {
+    max-width: 100%;
+}
+
+/* =========================================================
+   Tablet & Mobile
+   ========================================================= */
+@media (max-width: 991.98px) {
+    body {
+        font-size: 14px;
+        background: #eef2f7;
+    }
+
+    .mobile-topbar {
+        width: 100% !important;
+        max-width: 100vw !important;
+        left: 0 !important;
+        right: 0 !important;
+        padding-left: .5rem !important;
+        padding-right: .5rem !important;
+    }
+
+    .mobile-topbar-title {
+        max-width: calc(100vw - 115px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: .8rem !important;
+    }
+
+    .app-content {
+        width: 100% !important;
+        max-width: 100vw !important;
+        margin-left: 0 !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+        overflow-x: hidden !important;
+    }
+
+    .page-shell {
+        width: 100% !important;
+        max-width: 100% !important;
+        padding-left: .55rem !important;
+        padding-right: .55rem !important;
+    }
+
+    /* Semua row jangan bikin layar melebar */
+    .row,
+    .row.g-3,
+    .row.g-4 {
+        max-width: 100%;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+    }
+
+    .row > [class*="col-"] {
+        min-width: 0;
+        padding-left: .35rem !important;
+        padding-right: .35rem !important;
+    }
+
+    /* Filter panel mobile */
+    .filter-panel {
+        width: 100% !important;
+        border-radius: 14px !important;
+        padding: .85rem !important;
+    }
+
+    .filter-panel form > [class*="col-"],
+    .filter-panel .row > [class*="col-"] {
+        flex: 0 0 100% !important;
+        max-width: 100% !important;
+        width: 100% !important;
+    }
+
+    .form-label {
+        font-size: .74rem !important;
+        font-weight: 800;
+        margin-bottom: .25rem;
+    }
+
+    .form-control,
+    .form-select,
+    .btn {
+        min-height: 42px;
+    }
+
+    .btn {
+        white-space: normal !important;
+        line-height: 1.2;
+    }
+
+    .period-box {
+        width: 100% !important;
+        font-size: .76rem;
+        overflow-wrap: anywhere;
+    }
+
+    /* Caption / judul report */
+    .report-caption {
+        width: 100% !important;
+        gap: .65rem !important;
+        align-items: stretch !important;
+        padding: .85rem .75rem !important;
+        border-radius: 12px 12px 0 0 !important;
+    }
+
+    .report-caption > div {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .report-caption h5,
+    .report-caption .h5 {
+        font-size: .95rem !important;
+        line-height: 1.25;
+        margin-bottom: .2rem !important;
+    }
+
+    .report-caption .small {
+        font-size: .72rem !important;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+
+    .report-caption .d-flex.flex-wrap.gap-2.align-items-center,
+    .report-actions {
+        width: 100% !important;
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: .45rem !important;
+        align-items: stretch !important;
+    }
+
+    .report-caption .btn,
+    .report-actions .btn,
+    .report-actions .status-pill,
+    .status-pill {
+        width: 100% !important;
+        max-width: 100% !important;
+        justify-content: center !important;
+        text-align: center !important;
+        white-space: normal !important;
+        font-size: .72rem !important;
+        min-height: 38px;
+        padding: .45rem .55rem !important;
+    }
+
+    /* Card umum */
+    .card,
+    .chart-panel,
+    .chart-card,
+    .raw-data-card,
+    .summary-card,
+    .kpi-card,
+    .insight-card {
+        width: 100% !important;
+        max-width: 100% !important;
+        border-radius: 14px !important;
+    }
+
+    .chart-panel,
+    .chart-card {
+        padding: .85rem !important;
+    }
+
+    .chart-title {
+        font-size: .88rem !important;
+    }
+
+    .chart-subtitle {
+        font-size: .72rem !important;
+    }
+
+    .chart-panel canvas,
+    .chart-card canvas,
+    .card canvas {
+        max-height: 300px;
+    }
+
+    /* =====================================================
+       TABLE RESPONSIVE V2
+       Tabel tidak dipaksa masuk semua kolom.
+       Tabel dibuat compact + scroll kanan/kiri.
+       ===================================================== */
+
+    .table-responsive,
+    .report-table-wrap,
+    .raw-table-wrap,
+    .kpi-table-wrap,
+    .detail-table-wrap,
+    .stock-table-wrap,
+    .data-table-wrap {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: auto !important;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-x: contain;
+        border-radius: 10px !important;
+        border: 1px solid #d0d5dd;
+        background: #ffffff;
+    }
+
+    .report-table-wrap {
+        max-height: none !important;
+    }
+
+    .report-table-wrap::before,
+    .raw-table-wrap::before,
+    .kpi-table-wrap::before,
+    .detail-table-wrap::before,
+    .stock-table-wrap::before,
+    .data-table-wrap::before,
+    .table-responsive::before {
+        content: "Geser tabel ke kanan/kiri →";
+        display: block;
+        position: sticky;
+        left: 0;
+        top: 0;
+        z-index: 30;
+        padding: .42rem .6rem;
+        font-size: .7rem;
+        font-weight: 800;
+        color: #344054;
+        background: #f8fafc;
+        border-bottom: 1px solid #e4e7ec;
+    }
+
+    /* Report table dibuat jauh lebih compact daripada versi sebelumnya */
+    .report-table,
+    table.report-table {
+        width: max-content !important;
+        min-width: 720px !important;
+        table-layout: auto !important;
+        border-collapse: separate !important;
+        border-spacing: 0 !important;
+        font-size: 10px !important;
+        line-height: 1.15 !important;
+        margin-bottom: 0 !important;
+    }
+
+    .report-table th,
+    .report-table td {
+        padding: .36rem .34rem !important;
+        vertical-align: middle !important;
+        white-space: nowrap !important;
+        border-color: #98a2b3 !important;
+    }
+
+    .report-table th {
+        font-size: 8px !important;
+        line-height: 1.15 !important;
+        text-align: center !important;
+        white-space: normal !important;
+        word-break: normal !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .report-table td {
+        font-size: 10px !important;
+        text-align: right !important;
+    }
+
+    /* Kolom pertama tetap kelihatan, tapi dibuat lebih kecil dan bisa wrap */
+    .report-table th:first-child,
+    .report-table td:first-child,
+    .report-table .line-head,
+    .report-table .line-cell {
+        position: sticky !important;
+        left: 0 !important;
+        z-index: 8;
+        width: 135px !important;
+        min-width: 135px !important;
+        max-width: 135px !important;
+        white-space: normal !important;
+        word-break: normal !important;
+        overflow-wrap: anywhere !important;
+        text-align: left !important;
+        background: #ffffff;
+        box-shadow: 5px 0 8px rgba(16, 24, 40, .08);
+    }
+
+    .report-table thead th:first-child,
+    .report-table thead .line-head {
+        z-index: 20;
+        background: #ffc000 !important;
+        color: #000000 !important;
+        text-align: center !important;
+    }
+
+    .report-table td:first-child,
+    .report-table .line-cell {
+        font-size: 9.2px !important;
+        font-weight: 800 !important;
+        line-height: 1.2 !important;
+    }
+
+    .report-table th:not(:first-child),
+    .report-table td:not(:first-child) {
+        min-width: 82px !important;
+        max-width: 95px !important;
+    }
+
+    .report-table .total-row td,
+    .report-table tr.total-row td,
+    .report-table tfoot td {
+        font-weight: 900 !important;
+    }
+
+    .report-table .total-row .line-cell,
+    .report-table tr.total-row td:first-child,
+    .report-table tfoot td:first-child {
+        background: #ffc000 !important;
+        color: #000000 !important;
+    }
+
+    .contribution-badge {
+        min-width: 48px;
+        padding: .12rem .28rem;
+        font-size: .62rem;
+    }
+
+    /* Raw data table */
+    .raw-table,
+    table.raw-table {
+        width: max-content !important;
+        min-width: 1200px !important;
+        table-layout: auto !important;
+        font-size: 9.5px !important;
+        margin-bottom: 0 !important;
+    }
+
+    .raw-table th,
+    .raw-table td {
+        padding: .34rem .38rem !important;
+        white-space: nowrap !important;
+        vertical-align: middle !important;
+    }
+
+    .raw-table th {
+        font-size: 8px !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .raw-table th:first-child,
+    .raw-table td:first-child {
+        position: sticky !important;
+        left: 0 !important;
+        z-index: 8;
+        background: #ffffff;
+        box-shadow: 5px 0 8px rgba(16, 24, 40, .08);
+    }
+
+    .raw-table thead th:first-child {
+        z-index: 20;
+        background: #101828 !important;
+        color: #ffffff !important;
+    }
+
+    /* Raw data controls */
+    .raw-data-card {
+        padding: .85rem !important;
+    }
+
+    .raw-data-card [data-raw-search] {
+        width: 100%;
+    }
+
+    .raw-data-card .d-flex.flex-wrap.gap-2.align-items-end.mb-2 > div {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    .raw-data-card [data-raw-info] {
+        margin-left: 0 !important;
+        width: 100%;
+        text-align: left;
+    }
+
+    .raw-pagination {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        justify-content: stretch !important;
+        gap: .5rem !important;
+        width: 100%;
+    }
+
+    .raw-pagination .btn {
+        width: 100%;
+    }
+}
+
+/* =========================================================
+   HP kecil
+   ========================================================= */
+@media (max-width: 575.98px) {
+    body {
+        font-size: 13px;
+    }
+
+    .page-shell {
+        padding-left: .4rem !important;
+        padding-right: .4rem !important;
+    }
+
+    .filter-panel,
+    .raw-data-card,
+    .card,
+    .chart-panel,
+    .chart-card {
+        padding: .7rem !important;
+    }
+
+    h1,
+    .h1 {
+        font-size: 1.25rem !important;
+    }
+
+    h2,
+    .h2 {
+        font-size: 1.1rem !important;
+    }
+
+    h5,
+    .h5 {
+        font-size: .95rem !important;
+    }
+
+    .report-table,
+    table.report-table {
+        min-width: 650px !important;
+        font-size: 9.4px !important;
+    }
+
+    .report-table th,
+    .report-table td {
+        padding: .32rem .28rem !important;
+    }
+
+    .report-table th {
+        font-size: 7.5px !important;
+    }
+
+    .report-table td {
+        font-size: 9.2px !important;
+    }
+
+    .report-table th:first-child,
+    .report-table td:first-child,
+    .report-table .line-head,
+    .report-table .line-cell {
+        width: 118px !important;
+        min-width: 118px !important;
+        max-width: 118px !important;
+    }
+
+    .report-table td:first-child,
+    .report-table .line-cell {
+        font-size: 8.4px !important;
+    }
+
+    .report-table th:not(:first-child),
+    .report-table td:not(:first-child) {
+        min-width: 72px !important;
+        max-width: 82px !important;
+    }
+
+    .raw-table,
+    table.raw-table {
+        min-width: 1050px !important;
+        font-size: 9px !important;
+    }
+
+    .raw-table th,
+    .raw-table td {
+        padding: .3rem .32rem !important;
+    }
+
+    .raw-table th {
+        font-size: 7.4px !important;
+    }
+
+    .mobile-topbar-title {
+        font-size: .72rem !important;
+    }
+
+    .sidebar-link {
+        font-size: .8rem !important;
+    }
+}
+
+/* =========================================================
+   HP sangat kecil / narrow webview
+   ========================================================= */
+@media (max-width: 390px) {
+    .page-shell {
+        padding-left: .3rem !important;
+        padding-right: .3rem !important;
+    }
+
+    .report-caption {
+        padding: .7rem .6rem !important;
+    }
+
+    .report-caption h5,
+    .report-caption .h5 {
+        font-size: .88rem !important;
+    }
+
+    .report-caption .small {
+        font-size: .68rem !important;
+    }
+
+    .report-caption .btn,
+    .report-actions .btn,
+    .status-pill {
+        font-size: .68rem !important;
+        min-height: 36px;
+    }
+
+    .report-table,
+    table.report-table {
+        min-width: 600px !important;
+    }
+
+    .report-table th:first-child,
+    .report-table td:first-child,
+    .report-table .line-head,
+    .report-table .line-cell {
+        width: 108px !important;
+        min-width: 108px !important;
+        max-width: 108px !important;
+    }
+
+    .report-table th:not(:first-child),
+    .report-table td:not(:first-child) {
+        min-width: 66px !important;
+        max-width: 76px !important;
+    }
+}

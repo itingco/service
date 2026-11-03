@@ -1,0 +1,378 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\ServiceQuotations;
+
+use Illuminate\Database\ConnectionInterface;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use RuntimeException;
+
+/**
+ * Sends saved DB_AppHub quotations to the ORIGINAL ERP tables given in service.xlsx.
+ * No CREATE / ALTER / DROP or updates to existing ERP records are performed.
+ * Price is NOT copied to AverageCost: IC_ServiceSpareParts has no sales-price field.
+ * All ERP inserts run in one transaction; required SQL columns are checked first.
+ */
+final class ServiceQuotationErpGateway
+{
+    private const TABLE_HEADER = 'dbo.IC_Services';
+    private const TABLE_DETAIL = 'dbo.IC_ServiceSpareParts';
+
+    public function __construct(
+        private readonly ServicePartAvailability $availability,
+        private readonly ServiceTypeCustomerRepository $customers,
+    )
+    {
+    }
+
+    public function enabled(): bool
+    {
+        return (bool) config('service_quotations.erp.enabled', true);
+    }
+
+    /**
+     * @param object $header DB_AppHub service_quotations row
+     * @param list<object> $lines DB_AppHub service_quotation_lines rows
+     */
+    public function send(object $header, array $lines): string
+    {
+        if (!$this->enabled()) {
+            throw new RuntimeException('Pengiriman ERP dinonaktifkan dalam config/service_quotations.php.');
+        }
+        if ((string) $header->status !== 'draft') {
+            throw new RuntimeException('Dokumen bukan draft dan tidak dapat dikirim ulang.');
+        }
+        if (!$lines) {
+            throw new RuntimeException('Dokumen tidak memiliki sparepart.');
+        }
+        $source = strtoupper(trim((string) $header->erp_source));
+        $connectionName = match ($source) {
+            'INGCO' => 'sqlsrv_ingco',
+            'SMI' => 'sqlsrv_smi',
+            default => throw new RuntimeException('Database ERP tidak valid.'),
+        };
+        $db = DB::connection($connectionName);
+        $this->assertSourceDatabase($db, 'AS_'.$source);
+
+        // IMPORTANT: SQL Server LIKE treats [..] as a character class. Use CHARINDEX
+        // to search this exact marker, otherwise unrelated quotations share a ServiceNumber.
+        $marker = '[APPHUB-QSV:'.(int) $header->id.']';
+        // Recovery must happen BEFORE revalidating stock/customer: ERP may already
+        // contain this document when the later DB_AppHub status update failed.
+        $already = $db->selectOne(
+            "SELECT TOP (1) ServiceNumber FROM dbo.IC_Services WHERE CHARINDEX(?, CONVERT(nvarchar(max), Remarks)) > 0 AND ServiceType = ? ORDER BY ServiceID DESC",
+            [$marker, strtoupper(trim((string) $header->doc_type_code))]
+        );
+        if ($already !== null) return (string) $already->ServiceNumber;
+
+        $serviceType = strtoupper(trim((string) $header->doc_type_code));
+        if (preg_match('/^[A-Z0-9-]{1,50}$/D', $serviceType) !== 1) {
+            throw new RuntimeException('Service Type ERP tidak valid.');
+        }
+        $typeExists = $db->selectOne(
+            "SELECT TOP (1) ServiceType FROM dbo.IC_Services WHERE ServiceType = ?",
+            [$serviceType]
+        );
+        if ($typeExists === null) {
+            throw new RuntimeException('Tidak ada dokumen sebelumnya untuk Service Type '.$serviceType.' pada AS_'.$source.'. Pola nomor belum dapat dipastikan; pengiriman dibatalkan.');
+        }
+
+        // Different ERP databases can have the same numeric ItemID/WarehouseID but
+        // refer to DIFFERENT items; never silently insert an INGCO part into SMI.
+        $totals = [];
+        $candidatesByRoot = [];
+        foreach ($lines as $line) {
+            if (strtoupper((string) $line->source) !== $source) {
+                throw new RuntimeException('Sparepart '.$line->sparepart_code.' berasal dari AS_'.strtoupper((string) $line->source)
+                    .', sedangkan service akan dikirim ke AS_'.$source.'. Pilih sparepart dari ERP yang sama pada draft baru.');
+            }
+            $quantity = (float) $line->qty;
+            if ($quantity <= 0 || $quantity !== (float) (int) $quantity) {
+                throw new RuntimeException('Qty sparepart harus bilangan bulat lebih dari nol.');
+            }
+            $root = (string) $line->requested_sparepart_code;
+            $candidatesByRoot[$root] ??= $this->availability->candidates($root);
+            $picked = $this->availability->confirm([
+                'item_code' => (string) $line->sparepart_code,
+                'source' => $source,
+                'warehouse_id' => (int) $line->warehouse_id,
+                'qty' => (int) $quantity,
+            ], $candidatesByRoot[$root]);
+            $key = $source.'|'.$line->warehouse_id.'|'.strtoupper((string) $line->sparepart_code);
+            $totals[$key]['qty'] = ($totals[$key]['qty'] ?? 0) + $quantity;
+            $totals[$key]['available'] = (float) $picked['qty_available'];
+            $totals[$key]['code'] = (string) $line->sparepart_code;
+        }
+        foreach ($totals as $t) {
+            if ($t['qty'] > $t['available']) {
+                throw new RuntimeException('Qty gabungan '.$t['code'].' lebih besar dari stok ERP saat ini.');
+            }
+        }
+
+        $headerCols = $this->columns($db, self::TABLE_HEADER);
+        $detailCols = $this->columns($db, self::TABLE_DETAIL);
+        $this->assertHas($headerCols, ['ServiceID', 'ServiceNumber', 'ServiceCounter', 'CustomerID', 'CustomerName', 'ItemID', 'ServiceType', 'Remarks', 'CustomerPhone', 'CustomerAddress'], self::TABLE_HEADER);
+        $this->assertHas($detailCols, ['ServiceDetailID', 'ServiceID', 'ItemID', 'WarehouseID', 'Quantity', 'UOMLevel', 'AverageCost'], self::TABLE_DETAIL);
+
+        // CustomerID is mapped PER (ERP database, Service Type) in DB_AppHub.
+        // CustomerName intentionally remains the name typed on the quotation.
+        $customerId = $this->customers->customerIdForService($source, $serviceType);
+        $itemId = $this->itemId($db, (string) $header->damaged_item_code);
+        $parts = [];
+        foreach ($lines as $line) {
+            $code = strtoupper(trim((string) $line->sparepart_code));
+            $partId = $this->itemId($db, $code);
+            $warehouseId = (int) $line->warehouse_id;
+            if ($db->selectOne('SELECT WarehouseID FROM dbo.IC_Warehouses WHERE WarehouseID = ?', [$warehouseId]) === null) {
+                throw new RuntimeException('Gudang ERP '.$warehouseId.' tidak ditemukan pada AS_'.$source.'.');
+            }
+            $cost = $this->averageCost($db, $partId, $detailCols);
+            $parts[] = compact('line', 'partId', 'warehouseId', 'cost');
+        }
+
+        $user = 'APPHUB'; // Do not impersonate a real ERP user.
+        return $db->transaction(function () use ($db, $header, $parts, $headerCols, $detailCols, $serviceType, $customerId, $itemId, $user, $marker): string {
+            $lock = $db->selectOne(
+                "DECLARE @result INT; EXEC @result = sys.sp_getapplock @Resource = ?, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000; SELECT @result AS lock_result",
+                ['apphub:service:'.(string) $header->erp_source.':'.$serviceType]
+            );
+            if (!$lock || (int) ($lock->lock_result ?? -1) < 0) {
+                throw new RuntimeException('ERP sedang sibuk mengunci dokumen, silakan coba lagi.');
+            }
+            // Recovery if ERP commit succeeded but DB_AppHub markSent failed.
+            $existing = $db->selectOne(
+                "SELECT TOP (1) ServiceNumber FROM dbo.IC_Services WHERE CHARINDEX(?, CONVERT(nvarchar(max), Remarks)) > 0 AND ServiceType = ? ORDER BY ServiceID DESC",
+                [$marker, $serviceType]
+            );
+            if ($existing !== null) return (string) $existing->ServiceNumber;
+
+            // Lock BOTH tables to safely allocate IDs even if ERP uses manual
+            // ServiceID/ServiceDetailID instead of SQL IDENTITY. Transaction is short.
+            $lastHeader = $db->selectOne(
+                'SELECT ISNULL(MAX(ServiceID), 0) AS LastID FROM dbo.IC_Services WITH (TABLOCKX, HOLDLOCK)'
+            );
+            $lastDetail = $db->selectOne(
+                'SELECT ISNULL(MAX(ServiceDetailID), 0) AS LastID FROM dbo.IC_ServiceSpareParts WITH (TABLOCKX, HOLDLOCK)'
+            );
+            $lastNumber = $db->selectOne(
+                'SELECT TOP (1) ServiceNumber, ServiceCounter FROM dbo.IC_Services WITH (HOLDLOCK) '
+                ."WHERE ServiceType = ? AND ServiceNumber IS NOT NULL AND LTRIM(RTRIM(ServiceNumber)) <> '' ORDER BY ServiceID DESC",
+                [$serviceType]
+            );
+            if ($lastNumber === null) throw new RuntimeException('Nomor terakhir Service Type '.$serviceType.' tidak ditemukan.');
+            $numberFormat = ServiceErpNumbering::parse((string) $lastNumber->ServiceNumber, $serviceType);
+            // Keep prefix and width from the most recent ERP document, but reset
+            // sequence to 0001 in a new calendar month (WIB) for this Service Type.
+            // Never include ServiceCounter from the previous month in this MAX.
+            $erpNow = \Illuminate\Support\Carbon::now(
+                (string) config('service_quotations.erp.timezone', 'Asia/Jakarta')
+            );
+            $numberDate = ServiceErpNumbering::dateForSend($erpNow);
+            $monthPrefix = ServiceErpNumbering::monthPrefix(
+                $numberFormat['prefix'], $serviceType, $numberDate
+            );
+            $prefixLength = strlen($monthPrefix);
+            // Matching format: PREFIX/SERVICE-TYPE/YYMMDD/NNNN
+            //               : monthPrefix + DD + '/' + numeric suffix
+            // SQL Server LIKE treats underscore as a wildcard; LEFT equality with
+            // bound parameters is used instead. Reads ERP data only, under the
+            // existing exclusive transaction/table locks.
+            $maxCounter = $db->selectOne(
+                "SELECT COALESCE(MAX(TRY_CONVERT(bigint, ServiceCounter)), 0) AS Value,
+                        COALESCE(MAX(TRY_CONVERT(bigint, SUBSTRING(ServiceNumber, ?, 50))), 0) AS NumberSuffix
+                   FROM dbo.IC_Services WITH (HOLDLOCK)
+                  WHERE ServiceType = ?
+                    AND LEFT(LTRIM(RTRIM(ServiceNumber)), ?) = ?
+                    AND SUBSTRING(LTRIM(RTRIM(ServiceNumber)), ?, 1) = '/'
+                    AND TRY_CONVERT(int, SUBSTRING(LTRIM(RTRIM(ServiceNumber)), ?, 2)) BETWEEN 1 AND 31
+                    AND TRY_CONVERT(bigint, SUBSTRING(LTRIM(RTRIM(ServiceNumber)), ?, 50)) IS NOT NULL",
+                [
+                    $prefixLength + 4, $serviceType, $prefixLength, $monthPrefix,
+                    $prefixLength + 3, $prefixLength + 1, $prefixLength + 4,
+                ]
+            );
+            // If no service exists for the same YYMM, both values are zero.
+            $counter = ServiceErpNumbering::nextCounter(
+                (int) ($maxCounter->Value ?? 0),
+                (int) ($maxCounter->NumberSuffix ?? 0)
+            );
+            $docNo = ServiceErpNumbering::make(
+                $numberFormat['prefix'], $serviceType, $numberDate, $counter, $numberFormat['width']
+            );
+            if ($db->selectOne('SELECT TOP (1) ServiceID FROM dbo.IC_Services WHERE ServiceNumber = ?', [$docNo])) {
+                throw new RuntimeException('Nomor ERP sudah ada: '.$docNo.'. Proses dibatalkan.');
+            }
+
+            $now = $erpNow;
+            $row = [
+                'ServiceNumber' => $docNo,
+                'ServiceCounter' => $counter,
+                'ReceivedDate' => $now,
+                'CustomerID' => $customerId,
+                'CustomerName' => (string) $header->customer_name,
+                'CustomerPhone' => (string) ($header->customer_phone ?? ''),
+                'CustomerAddress' => (string) ($header->customer_address ?? ''),
+                'PaymentTerm' => 0,
+                'ItemWarranty' => 0,
+                'Problems' => (string) ($header->complaint ?? ''),
+                'CurrencyID' => $this->currencyId($db, $serviceType),
+                'ExchangeRate' => 1,
+                'NetTotal' => 0,
+                'IsCash' => 0,
+                'Void' => 0,
+                'Remarks' => $marker,
+                'CreatedBy' => $user,
+                'CreateDate' => $now,
+                'LastModBy' => $user,
+                'LastMod' => $now,
+                'CoState' => 'New',
+                'CoUID' => (string) Str::uuid(),
+                'ItemID' => $itemId,
+                'DontPostToGL' => 0,
+                'SalesPersonID' => 0,
+                'AmtDisc' => 0,
+                'Total' => 0,
+                'ServiceType' => $serviceType,
+                'HideInStock' => 0,
+            ];
+            $headerIdentity = (bool) $headerCols['ServiceID']['identity'];
+            if (!$headerIdentity) $row['ServiceID'] = ((int) $lastHeader->LastID) + 1;
+            $row = $this->allowedColumns($row, $headerCols);
+            $this->assertReadyForInsert($row, $headerCols, self::TABLE_HEADER);
+            if ($headerIdentity) {
+                // OUTPUT ... INTO table variable works even if IC_Services has an INSERT trigger.
+                $names = array_keys($row);
+                $identifiers = implode(', ', array_map(static fn (string $c): string => '['.$c.']', $names));
+                $placeholders = implode(', ', array_fill(0, count($names), '?'));
+                $insert = 'SET NOCOUNT ON; DECLARE @newService TABLE (id BIGINT); '
+                    .'INSERT INTO dbo.IC_Services ('.$identifiers.') OUTPUT INSERTED.ServiceID INTO @newService(id) '
+                    .'VALUES ('.$placeholders.'); SELECT TOP (1) id AS ServiceID FROM @newService;';
+                $record = $db->selectOne($insert, array_values($row));
+                $serviceId = (int) ($record->ServiceID ?? 0);
+                if ($serviceId <= 0) throw new RuntimeException('ERP tidak mengembalikan ServiceID setelah INSERT.');
+            } else {
+                $db->table(self::TABLE_HEADER)->insert($row);
+                $serviceId = (int) $row['ServiceID'];
+            }
+            foreach ($parts as $index => $part) {
+                $line = $part['line'];
+                $detail = [
+                    'ServiceID' => $serviceId,
+                    'ItemID' => $part['partId'],
+                    'UOMLevel' => 1,
+                    'WarehouseID' => $part['warehouseId'],
+                    'Quantity' => (int) $line->qty,
+                    'CreatedBy' => $user,
+                    'CreateDate' => $now,
+                    'LastModBy' => $user,
+                    'LastMod' => $now,
+                    'CoState' => 'New',
+                    'CoUID' => (string) Str::uuid(),
+                    'Inv' => 0, // Quotation is not an invoice, never assume invoiced.
+                ];
+                // AverageCost is distinct from retail_price / quote unit_price.
+                if ($part['cost'] !== null) $detail['AverageCost'] = $part['cost'];
+                $detailIdentity = (bool) $detailCols['ServiceDetailID']['identity'];
+                if (!$detailIdentity) $detail['ServiceDetailID'] = ((int) $lastDetail->LastID) + $index + 1;
+                $detail = $this->allowedColumns($detail, $detailCols);
+                $this->assertReadyForInsert($detail, $detailCols, self::TABLE_DETAIL);
+                $db->table(self::TABLE_DETAIL)->insert($detail);
+            }
+            return $docNo;
+        }, 1);
+    }
+
+    private function assertSourceDatabase(ConnectionInterface $db, string $expected): void
+    {
+        if ($db->getDriverName() !== 'sqlsrv') throw new RuntimeException('Koneksi ERP wajib SQL Server.');
+        $active = (string) ($db->selectOne('SELECT DB_NAME() AS ActiveDatabase')->ActiveDatabase ?? '');
+        if (strcasecmp($active, $expected) !== 0) {
+            throw new RuntimeException('Koneksi ERP aktif '.$active.', seharusnya '.$expected.'. INSERT dibatalkan.');
+        }
+    }
+
+    /** @return array<string,array{nullable:bool,identity:bool,computed:bool,default:bool,generated:int,type:string}> */
+    private function columns(ConnectionInterface $db, string $table): array
+    {
+        $rows = $db->select(
+            'SELECT c.name AS Name, c.is_nullable AS Nullable, c.is_identity AS IdentityColumn, '
+            .'c.is_computed AS ComputedColumn, '
+            .'CASE WHEN c.default_object_id = 0 THEN 0 ELSE 1 END AS HasDefault, '
+            .'TYPE_NAME(c.user_type_id) AS DataType '
+            .'FROM sys.columns AS c WHERE c.object_id = OBJECT_ID(?)',
+            [$table]
+        );
+        if (!$rows) throw new RuntimeException('Tabel ERP '.$table.' tidak ditemukan atau metadata tidak dapat dibaca.');
+        $columns = [];
+        foreach ($rows as $r) {
+            $columns[(string) $r->Name] = [
+                'nullable' => (bool) $r->Nullable,
+                'identity' => (bool) $r->IdentityColumn,
+                'computed' => (bool) $r->ComputedColumn,
+                'default' => (bool) $r->HasDefault,
+                'type' => strtolower((string) $r->DataType),
+            ];
+        }
+        return $columns;
+    }
+
+    /** @param array<string,array<string,mixed>> $cols */
+    private function assertHas(array $cols, array $mandatory, string $table): void
+    {
+        foreach ($mandatory as $col) {
+            if (!isset($cols[$col])) throw new RuntimeException('Kolom '.$table.'.'.$col.' wajib ada. Periksa skema asli ERP.');
+        }
+    }
+
+    /** @param array<string,mixed> $values @param array<string,array<string,mixed>> $cols @return array<string,mixed> */
+    private function allowedColumns(array $values, array $cols): array
+    {
+        // Empty/absent fields are deliberately omitted. SQL nullable/default columns
+        // will be set to NULL/default by the DB engine.
+        return array_filter($values, static fn (mixed $v, string $col): bool => array_key_exists($col, $cols) && $v !== null && $v !== '', ARRAY_FILTER_USE_BOTH);
+    }
+
+    /** @param array<string,mixed> $values @param array<string,array<string,mixed>> $cols */
+    private function assertReadyForInsert(array $values, array $cols, string $table): void
+    {
+        $missing = [];
+        foreach ($cols as $col => $meta) {
+            if (in_array($meta['type'], ['timestamp','rowversion'], true) || $meta['identity'] || $meta['computed'] || $meta['nullable'] || $meta['default']) continue;
+            if (!array_key_exists($col, $values)) $missing[] = $col;
+        }
+        if ($missing) {
+            throw new RuntimeException('Kolom NOT NULL tanpa default pada '.$table.' belum bisa diisi dari penawaran: '.implode(', ', $missing).'. Tidak ada INSERT ERP.');
+        }
+    }
+
+    private function itemId(ConnectionInterface $db, string $code): int
+    {
+        $row = $db->selectOne('SELECT TOP (1) ItemID FROM dbo.IC_Items WHERE UPPER(LTRIM(RTRIM(ItemCode))) = ?', [strtoupper(trim($code))]);
+        if (!$row) throw new RuntimeException('Item '.$code.' tidak ditemukan di master ERP tujuan.');
+        return (int) $row->ItemID;
+    }
+
+    private function currencyId(ConnectionInterface $db, string $serviceType): int
+    {
+        $row = $db->selectOne('SELECT TOP (1) CurrencyID FROM dbo.IC_Services WHERE ServiceType = ? AND CurrencyID IS NOT NULL ORDER BY ServiceID DESC', [$serviceType]);
+        if (!$row || (int) $row->CurrencyID <= 0) throw new RuntimeException('CurrencyID ERP untuk Service Type '.$serviceType.' tidak ditemukan.');
+        return (int) $row->CurrencyID;
+    }
+
+    /** @param array<string,array<string,mixed>> $detailCols */
+    private function averageCost(ConnectionInterface $db, int $itemId, array $detailCols): ?float
+    {
+        if (!isset($detailCols['AverageCost'])) return null;
+        $masterCols = $this->columns($db, 'dbo.IC_Items');
+        if (isset($masterCols['AverageCost'])) {
+            $row = $db->selectOne('SELECT AverageCost FROM dbo.IC_Items WHERE ItemID = ?', [$itemId]);
+            if ($row && $row->AverageCost !== null) return (float) $row->AverageCost;
+        }
+        if (!$detailCols['AverageCost']['nullable'] && !$detailCols['AverageCost']['default']) {
+            throw new RuntimeException('IC_ServiceSpareParts.AverageCost wajib, tetapi biaya pokok item ERP belum memiliki sumber yang tervalidasi. Harga RETAIL tidak boleh digunakan sebagai AverageCost. Kirimkan sumber AverageCost yang dipakai ERP.');
+        }
+        return null;
+    }
+}

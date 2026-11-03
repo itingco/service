@@ -1,0 +1,112 @@
+name: Verify and Package Product Strategy Branch
+
+on:
+  push:
+    branches:
+      - feature/product-focus-similar-items
+      - chatgpt/apphub-product-strategy
+  workflow_dispatch:
+
+jobs:
+  verify-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, sqlite3, pdo_sqlite, zip
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare test environment
+        run: |
+          cp .env.example .env
+          touch database/database.sqlite
+          php artisan key:generate
+          php artisan optimize:clear
+
+      - name: PHP syntax check for changed PHP files
+        run: |
+          php -l app/Http/Controllers/ProductStrategyCatalogController.php
+          php -l app/Http/Controllers/ProductStrategyAdvisorController.php
+          php -l app/Http/Controllers/StockStrategyReviewController.php
+          php -l app/Services/ProductStrategy/ProductStrategyCatalogRepository.php
+          php -l app/Services/ProductStrategy/ProductStrategySpreadsheetService.php
+          php -l app/Services/ProductStrategy/StockStrategyReviewService.php
+          php -l app/Console/Commands/MigrateProductStrategyToAppHub.php
+          php -l config/product_strategy.php
+          php -l config/database.php
+          php -l app/Data/SalesDashboardFilter.php
+          php -l app/Data/SalesKpi/SalesKpiFilter.php
+          php -l app/Data/StockAgingFilter.php
+          php -l app/Exports/SalesDashboardExport.php
+          php -l app/Exports/SalesInsightsExport.php
+          php -l app/Exports/SalesKpi/SalesKpiDetailExport.php
+          php -l app/Exports/SalesKpi/SalesKpiExport.php
+          php -l app/Exports/StockAgingDetailExport.php
+          php -l app/Services/SalesDashboardInsightService.php
+          php -l app/Support/SalesDashboardRowNormalizer.php
+          php -l app/Support/SalesKpiRowNormalizer.php
+          php -l app/Support/StockAgingRowNormalizer.php
+          php -l database/migrations/2026_09_03_000500_create_product_strategy_catalog_tables.php
+          php -l database/migrations/2026_09_06_000600_backfill_product_master_permissions.php
+          php -l routes/web.php
+
+      - name: Validate routes and Blade views
+        run: |
+          php artisan route:list --path=business-analytics/product-focus
+          php artisan route:list --path=business-analytics/similar-items
+          php artisan route:list --path=business-analytics/product-advisor/items
+          php artisan route:list --path=stock-aging/strategy-review
+          php artisan view:cache
+
+      - name: Check Item Reject public terminology
+        run: |
+          if grep -RniE 'Clearance Sale|CLEARANCE SALE|Bukan Clearance|BUKAN CLEARANCE SALE|Discontinued.?[/+& ]+Clearance|Disc\./Clearance|>Clearance<' resources/views app/Exports public/js app/Services/SalesDashboardInsightService.php app/Data/SalesDashboardFilter.php app/Data/StockAgingFilter.php --exclude='*.bak'; then
+            echo "Old user-facing Clearance terminology is still present."
+            exit 1
+          fi
+
+      - name: Run focused tests
+        run: |
+          vendor/bin/phpunit tests/Unit/ProductStrategyCatalogRepositoryTest.php
+          vendor/bin/phpunit tests/Unit/StockStrategyReviewServiceTest.php
+          vendor/bin/phpunit tests/Unit/ItemRejectTerminologyTest.php
+          vendor/bin/phpunit tests/Unit/ProductMasterPermissionsTest.php
+          php tests/Smoke/product_advisor_item_picker_source_test.php
+          php tests/Smoke/master_data_sidebar_and_stock_columns_test.php
+
+      - name: Clear generated runtime files
+        run: |
+          php artisan optimize:clear
+          rm -f .env database/database.sqlite
+
+      - name: Create source ZIP
+        run: |
+          zip -r sales-dashboard-apphub-product-strategy.zip . \
+            -x '.git/*' \
+               'vendor/*' \
+               'node_modules/*' \
+               '.env' \
+               '.env.encrypted' \
+               '.env.before-*' \
+               'database/database.sqlite' \
+               'bootstrap/cache/*.php' \
+               'storage/logs/*' \
+               'storage/framework/cache/*' \
+               'storage/framework/sessions/*' \
+               'storage/framework/views/*'
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sales-dashboard-apphub-product-strategy
+          path: sales-dashboard-apphub-product-strategy.zip
+          if-no-files-found: error
+          retention-days: 7

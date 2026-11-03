@@ -1,0 +1,64 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Requests;
+
+use App\Data\ThreeMonthSalesReviewFilter;
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+final class ThreeMonthSalesReviewRequest extends FormRequest
+{
+    // MULTISTATUS-PATCH
+    protected function prepareForValidation(): void
+    {
+        $this->merge([
+            'database' => strtolower((string) $this->input('database', 'all')),
+            'end_date' => (string) $this->input('end_date', now()->format('Y-m-d')),
+            'item_status' => implode(',', array_values(array_unique(array_map('strtolower', array_filter(array_map('trim', (array) $this->input('item_status', ['all']))))))),
+        ]);
+    }
+
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    public function rules(): array
+    {
+        return [
+            'database' => ['required', Rule::in(['all', 'ingco', 'smi'])],
+            'end_date' => ['required', 'date_format:Y-m-d'],
+            'item_status' => ['required', 'regex:/^(all|normal|discontinued|discontinued_sale|clearance|reject)(,(normal|discontinued|discontinued_sale|clearance|reject))*$/D'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'database.required' => 'Database wajib dipilih.',
+            'database.in' => 'Pilihan database tidak valid.',
+            'end_date.required' => 'Tanggal akhir review wajib diisi.',
+            'end_date.date_format' => 'Format tanggal akhir review harus YYYY-MM-DD.',
+            'item_status.required' => 'Status item wajib dipilih.',
+            'item_status.in' => 'Status item tidak valid.',
+        ];
+    }
+
+    protected function getRedirectUrl(): string
+    {
+        return route('sales-review-3-months.index');
+    }
+
+    public function filter(): ThreeMonthSalesReviewFilter
+    {
+        $validated = $this->validated();
+
+        return ThreeMonthSalesReviewFilter::from(
+            (string) $validated['database'],
+            (string) $validated['end_date'],
+            (string) $validated['item_status'],
+        );
+    }
+}

@@ -1,0 +1,256 @@
+@extends('layouts.app')
+
+@section('title', 'Business Analytics')
+
+@php
+    $number = static fn (float|int|null $value): string => $value === null ? '—' : number_format((float) $value, 0, ',', '.');
+    $percent = static fn (?float $value): string => $value === null ? '—' : number_format($value * 100, 1, ',', '.').'%';
+    $statusClass = static fn (string $status): string => match ($status) {
+        'ABOVE TARGET' => 'success',
+        'ON TRACK' => 'warning',
+        'AT RISK' => 'danger',
+        default => 'secondary',
+    };
+    $baseQuery = array_filter([
+        'database' => $filter->database,
+        'end_month' => $filter->endMonth,
+        'group_by' => $filter->groupBy,
+        'source' => $filter->source,
+        'line' => $filter->line,
+        'customer_code' => $filter->customerCode,
+        'salesperson' => $filter->salesperson,
+    ], static fn ($value) => $value !== null && $value !== '');
+    $forecastFirst = $report['forecast'][0] ?? null;
+    [$targetLevel, $targetSource, $targetKey] = $report['target_scope'];
+@endphp
+
+@push('styles')
+<style>
+    .ba-hero { background:linear-gradient(135deg,#101828,#17365d 58%,#244f86); color:#fff; border-radius:16px; padding:1.25rem 1.35rem; box-shadow:0 14px 32px rgba(16,24,40,.16); }
+    .ba-hero h1 { font-size:1.45rem; font-weight:900; margin:0; }
+    .ba-hero p { margin:.35rem 0 0; color:#d0d5dd; font-size:.78rem; }
+    .ba-card { height:100%; background:#fff; border:1px solid #d0d5dd; border-radius:12px; padding:1rem; box-shadow:0 6px 18px rgba(16,24,40,.055); }
+    .ba-card-label { color:#667085; font-size:.68rem; font-weight:900; letter-spacing:.055em; text-transform:uppercase; }
+    .ba-card-value { color:#101828; font-size:1.28rem; font-weight:900; margin:.28rem 0; font-variant-numeric:tabular-nums; }
+    .ba-card-note { color:#667085; font-size:.7rem; }
+    .ba-panel { background:#fff; border:1px solid #d0d5dd; border-radius:12px; padding:1rem; box-shadow:0 6px 18px rgba(16,24,40,.055); }
+    .ba-title { color:#101828; font-weight:900; font-size:.96rem; margin:0; }
+    .ba-subtitle { color:#667085; font-size:.7rem; margin-top:.18rem; }
+    .ba-forecast-card { border-top:4px solid #4472c4; }
+    .ba-forecast-card.status-success { border-top-color:#15803d; }
+    .ba-forecast-card.status-warning { border-top-color:#f59e0b; }
+    .ba-forecast-card.status-danger { border-top-color:#dc3545; }
+    .ba-range { background:#f8fafc; border-radius:8px; padding:.5rem .6rem; font-size:.7rem; color:#475467; }
+    .ba-insight { border-left:4px solid #4472c4; background:#fff; border-radius:9px; padding:.75rem .85rem; border-top:1px solid #eaecf0; border-right:1px solid #eaecf0; border-bottom:1px solid #eaecf0; height:100%; }
+    .ba-insight.success { border-left-color:#15803d; }
+    .ba-insight.warning { border-left-color:#f59e0b; }
+    .ba-insight.danger { border-left-color:#dc3545; }
+    .ba-insight-title { font-size:.76rem; font-weight:900; color:#101828; }
+    .ba-insight-text { font-size:.7rem; color:#667085; line-height:1.4; margin-top:.25rem; }
+    .ba-table-wrap { overflow:auto; max-height:62vh; border:1px solid #eaecf0; border-radius:9px; }
+    .ba-table { font-size:.72rem; margin:0; font-variant-numeric:tabular-nums; min-width:920px; }
+    .ba-table thead th { position:sticky; top:0; z-index:2; background:#101828; color:#fff; white-space:nowrap; }
+    .ba-table td { vertical-align:middle; }
+    .ba-drill { font-weight:800; text-decoration:none; }
+    .ba-breadcrumb { display:flex; flex-wrap:wrap; gap:.35rem; }
+    .ba-breadcrumb a,.ba-breadcrumb span { border-radius:999px; padding:.3rem .58rem; font-size:.67rem; font-weight:800; text-decoration:none; border:1px solid #d0d5dd; background:#fff; color:#344054; }
+    .ba-breadcrumb span { background:#fff2cc; border-color:#e9c548; color:#7a5500; }
+    .ba-target-input { min-width:130px; text-align:right; font-variant-numeric:tabular-nums; }
+    .ba-sync-note { background:#eef4ff; border:1px solid #c7d7fe; color:#3538cd; border-radius:8px; padding:.55rem .7rem; font-size:.7rem; }
+    #businessAnalyticsTrendChart { max-height:390px; }
+</style>
+@endpush
+
+@section('content')
+<div class="ba-hero mb-3 d-flex flex-column flex-xl-row justify-content-between align-items-xl-center gap-3">
+    <div>
+        <h1><i class="bi bi-bar-chart-line me-2"></i>Business Analytics</h1>
+        <p>Trend 36 bulan · forecast 3 bulan · target risk · drill-down company → lini → customer → salesperson → item.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <span class="badge text-bg-light">{{ $filter->label() }}</span>
+        <a class="btn btn-sm btn-success" href="{{ route('business-analytics.export.csv', $baseQuery) }}"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Export CSV</a>
+    </div>
+</div>
+
+@if (session('status'))
+    <div class="alert alert-success">{{ session('status') }}</div>
+@endif
+
+<section class="filter-panel p-3 p-lg-4 mb-3">
+    <form method="GET" action="{{ route('business-analytics.index') }}" class="row g-3 align-items-end">
+        <div class="col-12 col-md-3 col-xl-2">
+            <label class="form-label fw-bold">Database</label>
+            <select name="database" class="form-select">
+                <option value="all" @selected($filter->database==='all')>INGCO & SMI</option>
+                <option value="ingco" @selected($filter->database==='ingco')>INGCO</option>
+                <option value="smi" @selected($filter->database==='smi')>SMI</option>
+            </select>
+        </div>
+        <div class="col-12 col-md-3 col-xl-2">
+            <label class="form-label fw-bold">Sampai Bulan</label>
+            <input type="month" name="end_month" value="{{ $filter->endMonth }}" class="form-control" required>
+        </div>
+        <div class="col-12 col-md-3 col-xl-2">
+            <label class="form-label fw-bold">Kelompokkan</label>
+            <select name="group_by" class="form-select">
+                @foreach (['company'=>'Company','line'=>'Lini Penjualan','customer'=>'Customer','salesperson'=>'Salesperson','item'=>'Item'] as $value=>$label)
+                    <option value="{{ $value }}" @selected($filter->groupBy===$value)>{{ $label }}</option>
+                @endforeach
+            </select>
+        </div>
+        <input type="hidden" name="source" value="{{ $filter->source }}">
+        <input type="hidden" name="line" value="{{ $filter->line }}">
+        <input type="hidden" name="customer_code" value="{{ $filter->customerCode }}">
+        <input type="hidden" name="salesperson" value="{{ $filter->salesperson }}">
+        <div class="col-12 col-md-3 col-xl-2 d-grid"><button class="btn btn-report">Analisis</button></div>
+        <div class="col-12 col-xl-4">
+            <div class="ba-sync-note"><strong>Data mart terakhir:</strong> {{ $report['latest_period'] ?? 'belum ada' }}. Refresh histori via <code>php artisan analytics:sync --months=36</code>.</div>
+        </div>
+    </form>
+</section>
+
+<div class="ba-breadcrumb mb-3">
+    <a href="{{ route('business-analytics.index', ['database'=>$filter->database,'end_month'=>$filter->endMonth,'group_by'=>$filter->database==='all'?'company':'line']) }}">TOTAL</a>
+    @if ($filter->source)<span>{{ $filter->source }}</span>@endif
+    @if ($filter->line)<span>{{ $filter->line }}</span>@endif
+    @if ($filter->customerCode)<span>CUSTOMER {{ $filter->customerCode }}</span>@endif
+    @if ($filter->salesperson)<span>{{ $filter->salesperson }}</span>@endif
+</div>
+
+@if ($report['trend'] === [])
+    <div class="alert alert-warning">
+        <div class="fw-bold">Data Business Analytics belum tersedia.</div>
+        <div class="small mt-1">Sesudah migration, jalankan <code>php artisan analytics:sync --months=36</code>. Dashboard existing tetap dapat digunakan seperti biasa.</div>
+    </div>
+@else
+<div class="row g-3 mb-3">
+    <div class="col-6 col-xl-3"><div class="ba-card"><div class="ba-card-label">Sales {{ $filter->endMonth }}</div><div class="ba-card-value">Rp {{ $number($report['current_sales']) }}</div><div class="ba-card-note">Actual bulan terpilih</div></div></div>
+    <div class="col-6 col-xl-3"><div class="ba-card"><div class="ba-card-label">Growth MoM</div><div class="ba-card-value {{ ($report['mom_growth'] ?? 0)>=0?'text-success':'text-danger' }}">{{ $percent($report['mom_growth']) }}</div><div class="ba-card-note">vs bulan sebelumnya</div></div></div>
+    <div class="col-6 col-xl-3"><div class="ba-card"><div class="ba-card-label">Growth YoY</div><div class="ba-card-value {{ ($report['yoy_growth'] ?? 0)>=0?'text-success':'text-danger' }}">{{ $percent($report['yoy_growth']) }}</div><div class="ba-card-note">vs bulan sama tahun lalu</div></div></div>
+    <div class="col-6 col-xl-3"><div class="ba-card"><div class="ba-card-label">Forecast M+1</div><div class="ba-card-value">Rp {{ $number($forecastFirst['forecast'] ?? null) }}</div><div class="ba-card-note">{{ $forecastFirst['status'] ?? '—' }} · confidence {{ isset($forecastFirst['confidence']) ? $percent($forecastFirst['confidence']) : '—' }}</div></div></div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-12 col-xl-8">
+        <section class="ba-panel h-100">
+            <h2 class="ba-title">Trend Penjualan & Forecast</h2>
+            <div class="ba-subtitle mb-3">Actual historis sampai {{ $filter->endMonth }} dan proyeksi 3 bulan ke depan.</div>
+            <canvas id="businessAnalyticsTrendChart"></canvas>
+        </section>
+    </div>
+    <div class="col-12 col-xl-4">
+        <section class="ba-panel h-100">
+            <h2 class="ba-title">Annual Trend</h2>
+            <div class="ba-subtitle mb-2">Perbandingan YTD sampai bulan yang sama pada setiap tahun agar tidak membandingkan tahun berjalan dengan full-year.</div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr><th>Tahun</th><th class="text-end">Sales</th><th class="text-end">Growth</th></tr></thead>
+                    <tbody>@foreach ($report['yearly'] as $year)<tr><td class="fw-bold">{{ $year['year'] }}</td><td class="text-end">{{ $number($year['sales']) }}</td><td class="text-end {{ ($year['growth']??0)>=0?'text-success':'text-danger' }}">{{ $percent($year['growth']) }}</td></tr>@endforeach</tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    @foreach ($report['forecast'] as $fc)
+        @php($class = $statusClass($fc['status']))
+        <div class="col-12 col-md-4">
+            <div class="ba-card ba-forecast-card status-{{ $class }}">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div><div class="ba-card-label">Forecast {{ $fc['period'] }}</div><div class="ba-card-value">Rp {{ $number($fc['forecast']) }}</div></div>
+                    <span class="badge text-bg-{{ $class }}">{{ $fc['status'] }}</span>
+                </div>
+                <div class="ba-range mb-2">Range: Rp {{ $number($fc['lower']) }} — Rp {{ $number($fc['upper']) }}<br>Confidence: {{ $percent($fc['confidence']) }}</div>
+                <div class="small"><strong>Official target:</strong> Rp {{ $number($fc['official_target']) }}</div>
+                <div class="small"><strong>Recommended:</strong> Rp {{ $number($fc['recommended_target']) }}</div>
+                <div class="ba-card-note mt-1">{{ $fc['method'] }}</div>
+            </div>
+        </div>
+    @endforeach
+</div>
+
+@if ($report['forecast'] !== [] && ($dashboardMenuAccess['kpi_targets'] ?? false))
+<section class="ba-panel mb-3">
+    <div class="d-flex flex-column flex-xl-row justify-content-between gap-2 align-items-xl-center mb-3">
+        <div><h2 class="ba-title">Official Target — {{ $targetLevel }}</h2><div class="ba-subtitle">Scope: {{ $targetSource }} / {{ $targetKey }}. Recommended target tetap dihitung sistem dan tidak menimpa target resmi.</div></div>
+    </div>
+    <form method="POST" action="{{ route('business-analytics.targets.save') }}">
+        @csrf
+        <input type="hidden" name="scope_level" value="{{ $targetLevel }}">
+        <input type="hidden" name="source" value="{{ $targetSource }}">
+        <input type="hidden" name="dimension_key" value="{{ $targetKey }}">
+        <div class="table-responsive"><table class="table table-sm align-middle mb-2"><thead><tr><th>Periode</th><th>Forecast</th><th>Recommended</th><th>Official Target</th></tr></thead><tbody>
+        @foreach ($report['forecast'] as $fc)
+            <tr><td class="fw-bold">{{ $fc['period'] }}</td><td>Rp {{ $number($fc['forecast']) }}</td><td>Rp {{ $number($fc['recommended_target']) }}</td><td><input class="form-control form-control-sm ba-target-input" type="number" min="0" step="1000" name="targets[{{ $fc['period'] }}]" value="{{ $fc['official_target'] }}" placeholder="Belum diatur"></td></tr>
+        @endforeach
+        </tbody></table></div>
+        <button class="btn btn-sm btn-primary"><i class="bi bi-save me-1"></i>Simpan Official Target</button>
+    </form>
+</section>
+@endif
+
+<div class="row g-3 mb-3">
+    @foreach ($report['insights'] as $insight)
+        <div class="col-12 col-md-6 col-xl"><div class="ba-insight {{ $insight['type'] }}"><div class="ba-insight-title">{{ $insight['title'] }}</div><div class="ba-insight-text">{{ $insight['text'] }}</div></div></div>
+    @endforeach
+</div>
+
+<section class="ba-panel">
+    <div class="d-flex flex-column flex-xl-row justify-content-between gap-2 mb-3">
+        <div><h2 class="ba-title">Breakdown: {{ strtoupper($filter->groupBy) }}</h2><div class="ba-subtitle">Angka menggunakan akumulasi 3 bulan terakhir. Klik nama untuk drill-down ke level berikutnya.</div></div>
+        <span class="badge text-bg-dark align-self-xl-start">Top {{ count($report['breakdown']) }}</span>
+    </div>
+    <div class="ba-table-wrap"><table class="table table-hover ba-table"><thead><tr><th>#</th><th>{{ ucfirst($filter->groupBy) }}</th><th class="text-end">Sales 3M</th><th class="text-end">Contribution</th><th class="text-end">YoY Growth</th><th class="text-end">Qty</th><th>Next</th></tr></thead><tbody>
+    @forelse ($report['breakdown'] as $row)
+        @php
+            $drill = $baseQuery;
+            $next = $filter->nextLevel();
+            if ($next) {
+                $drill['group_by'] = $next;
+                if ($filter->groupBy === 'company') $drill['source'] = $row['key'];
+                if ($filter->groupBy === 'line') $drill['line'] = $row['key'];
+                if ($filter->groupBy === 'customer') $drill['customer_code'] = $row['key'];
+                if ($filter->groupBy === 'salesperson') $drill['salesperson'] = $row['key'];
+            }
+        @endphp
+        <tr>
+            <td>{{ $loop->iteration }}</td>
+            <td class="fw-bold">@if($next)<a class="ba-drill" href="{{ route('business-analytics.index', $drill) }}">{{ $row['label'] }}</a>@else{{ $row['label'] }}@endif</td>
+            <td class="text-end">{{ $number($row['sales']) }}</td><td class="text-end">{{ $percent($row['contribution']) }}</td><td class="text-end {{ ($row['yoy_growth']??0)>=0?'text-success':'text-danger' }}">{{ $percent($row['yoy_growth']) }}</td><td class="text-end">{{ $number($row['quantity']) }}</td><td>@if($next)<span class="badge text-bg-light">{{ strtoupper($next) }} →</span>@else<span class="text-secondary">Detail akhir</span>@endif</td>
+        </tr>
+    @empty
+        <tr><td colspan="7" class="text-center text-secondary py-4">Tidak ada breakdown untuk filter ini.</td></tr>
+    @endforelse
+    </tbody></table></div>
+</section>
+@endif
+@endsection
+
+@push('scripts')
+@if ($report['trend'] !== [])
+@php
+    $actualLabels = array_keys($report['trend']);
+    $forecastLabels = array_column($report['forecast'], 'period');
+    $labels = array_values(array_unique([...$actualLabels, ...$forecastLabels]));
+    $actualData = [];
+    $forecastData = [];
+    $lastActualPeriod = end($actualLabels);
+    foreach ($labels as $label) {
+        $actualData[] = $report['trend'][$label] ?? null;
+        if ($label === $lastActualPeriod) {
+            $forecastData[] = $report['trend'][$label] ?? null;
+            continue;
+        }
+        $fc = collect($report['forecast'])->firstWhere('period', $label);
+        $forecastData[] = $fc['forecast'] ?? null;
+    }
+@endphp
+<script>
+window.businessAnalyticsChartData = @json(['labels'=>$labels,'actual'=>$actualData,'forecast'=>$forecastData]);
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="{{ asset('js/business-analytics.js') }}"></script>
+@endif
+@endpush

@@ -1,0 +1,203 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\BusinessAnalytics;
+
+use DateTimeImmutable;
+
+final class ForecastEngine
+{
+    /**
+     * @param array<string,float|int> $monthlySeries keyed YYYY-MM ascending or unsorted
+     * @return list<array{period:string,forecast:float,lower:float,upper:float,confidence:float,method:string}>
+     */
+    public function forecast(array $monthlySeries, int $months = 3): array
+    {
+        $series = [];
+        foreach ($monthlySeries as $period => $value) {
+            if (!preg_match('/^\d{4}-\d{2}$/', (string) $period)) {
+                continue;
+            }
+            $series[(string) $period] = max(0.0, (float) $value);
+        }
+        ksort($series);
+
+        if ($series === []) {
+            return [];
+        }
+
+        $months = max(1, min(12, $months));
+        $periods = array_keys($series);
+        $values = array_values($series);
+        $lastPeriod = new DateTimeImmutable(end($periods).'-01');
+        $uncertainty = $this->uncertainty($values);
+        $confidence = max(0.50, min(0.95, 1.0 - $uncertainty));
+
+        $results = [];
+        $working = $series;
+        for ($step = 1; $step <= $months; $step++) {
+            $future = $lastPeriod->modify("+{$step} month");
+            $futureKey = $future->format('Y-m');
+            $forecast = $this->forecastOne($working, $futureKey);
+            $rangePct = max(0.08, min(0.35, $uncertainty * 1.5 + (($step - 1) * 0.025)));
+
+            $results[] = [
+                'period' => $futureKey,
+                'forecast' => $forecast,
+                'lower' => max(0.0, $forecast * (1.0 - $rangePct)),
+                'upper' => $forecast * (1.0 + $rangePct),
+                'confidence' => max(0.45, $confidence - (($step - 1) * 0.04)),
+                'method' => count($working) >= 18 ? 'ENSEMBLE TREND + SEASONALITY' : 'TREND + RECENT MOMENTUM',
+            ];
+            $working[$futureKey] = $forecast;
+        }
+
+        return $results;
+    }
+
+    public static function targetStatus(float $forecast, ?float $target): string
+    {
+        if ($target === null || $target <= 0.0) {
+            return 'NO TARGET';
+        }
+
+        $ratio = $forecast / $target;
+        if ($ratio >= 1.05) {
+            return 'ABOVE TARGET';
+        }
+        if ($ratio >= 0.90) {
+            return 'ON TRACK';
+        }
+
+        return 'AT RISK';
+    }
+
+    /** @param array<string,float> $series */
+    private function forecastOne(array $series, string $futureKey): float
+    {
+        $values = array_values($series);
+        $count = count($values);
+
+        if ($count === 1) {
+            return max(0.0, $values[0]);
+        }
+
+        $trend = $this->linearTrendForecast(array_slice($values, -12));
+        $recent = $this->recentMomentumForecast($values);
+
+        $seasonal = null;
+        $future = new DateTimeImmutable($futureKey.'-01');
+        $priorYearKey = $future->modify('-1 year')->format('Y-m');
+        if (array_key_exists($priorYearKey, $series)) {
+            $growth = $this->recentYoYGrowth($series);
+            $seasonal = max(0.0, $series[$priorYearKey] * (1.0 + $growth));
+        }
+
+        if ($seasonal !== null && $count >= 18) {
+            return max(0.0, ($seasonal * 0.45) + ($trend * 0.35) + ($recent * 0.20));
+        }
+
+        return max(0.0, ($trend * 0.65) + ($recent * 0.35));
+    }
+
+    /** @param list<float> $values */
+    private function linearTrendForecast(array $values): float
+    {
+        $n = count($values);
+        if ($n < 2) {
+            return $values[0] ?? 0.0;
+        }
+
+        $sumX = $sumY = $sumXY = $sumXX = 0.0;
+        foreach ($values as $i => $value) {
+            $x = (float) $i;
+            $sumX += $x;
+            $sumY += $value;
+            $sumXY += $x * $value;
+            $sumXX += $x * $x;
+        }
+
+        $denominator = ($n * $sumXX) - ($sumX * $sumX);
+        if (abs($denominator) < 0.000001) {
+            return (float) end($values);
+        }
+
+        $slope = (($n * $sumXY) - ($sumX * $sumY)) / $denominator;
+        $intercept = ($sumY - ($slope * $sumX)) / $n;
+
+        return max(0.0, $intercept + ($slope * $n));
+    }
+
+    /** @param list<float> $values */
+    private function recentMomentumForecast(array $values): float
+    {
+        $recent = array_slice($values, -4);
+        $weights = [0.10, 0.20, 0.30, 0.40];
+        $weights = array_slice($weights, -count($recent));
+        $weightSum = array_sum($weights);
+        $average = 0.0;
+        foreach ($recent as $i => $value) {
+            $average += $value * ($weights[$i] / $weightSum);
+        }
+
+        $last = (float) end($recent);
+        $previous = count($recent) >= 2 ? (float) $recent[count($recent) - 2] : $last;
+        $momentum = $previous > 0.0 ? max(-0.20, min(0.20, ($last / $previous) - 1.0)) : 0.0;
+
+        return max(0.0, $average * (1.0 + ($momentum * 0.35)));
+    }
+
+    /** @param array<string,float> $series */
+    private function recentYoYGrowth(array $series): float
+    {
+        $keys = array_keys($series);
+        $growths = [];
+        foreach (array_slice($keys, -6) as $key) {
+            $date = new DateTimeImmutable($key.'-01');
+            $prior = $date->modify('-1 year')->format('Y-m');
+            if (!isset($series[$prior]) || $series[$prior] <= 0.0) {
+                continue;
+            }
+            $growths[] = ($series[$key] / $series[$prior]) - 1.0;
+        }
+
+        if ($growths === []) {
+            return 0.0;
+        }
+
+        sort($growths);
+        $middle = intdiv(count($growths), 2);
+        $median = count($growths) % 2 === 0
+            ? ($growths[$middle - 1] + $growths[$middle]) / 2
+            : $growths[$middle];
+
+        return max(-0.30, min(0.35, $median));
+    }
+
+    /** @param list<float> $values */
+    private function uncertainty(array $values): float
+    {
+        if (count($values) < 4) {
+            return 0.20;
+        }
+
+        $errors = [];
+        for ($i = 1; $i < count($values); $i++) {
+            $actual = $values[$i];
+            $previous = $values[$i - 1];
+            if ($actual <= 0.0) {
+                continue;
+            }
+            $errors[] = abs($actual - $previous) / $actual;
+        }
+
+        if ($errors === []) {
+            return 0.15;
+        }
+
+        sort($errors);
+        $median = $errors[intdiv(count($errors), 2)];
+        return max(0.06, min(0.30, $median));
+    }
+}

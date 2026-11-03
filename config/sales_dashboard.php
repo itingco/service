@@ -1,0 +1,43 @@
+<?php
+
+return [
+    'targets' => [
+        'JAKARTA' => 250000000,
+        'GERAI KATAMSO' => 135000000,
+        'GERAI BOGOR' => 220000000,
+        'GERAI SETIA BUDI' => 135000000,
+        'GERAI HM YAMIN' => 110000000,
+        'GERAI GATOT SUBROTO' => 130000000,
+        'CITY HARDWARE & CITY GROSIR' => 650000000,
+        'LIVE HOST CG & CH' => 50000000,
+        'GERAI PKU' => 135000000,
+        'ANITA' => 350000000,
+        'WANDA FINNY' => 1400000000,
+        'TIKTOK & TOKPED - ARLIANA' => 330000000,
+        'SHOPEE - BELLA' => 400000000,
+        'WEB COMMERCE' => 85000000,
+        'LAZADA' => 15000000,
+        'FAJRIN' => 900000000,
+        'LAINNYA' => 950000000,
+        'WILIAM' => 900000000,
+    ],
+
+    'aliases' => [
+        'GERAI SETIABUDI' => 'GERAI SETIA BUDI',
+        'GERAI SETIA BUDI' => 'GERAI SETIA BUDI',
+        'CITY HARDWARE & CITY GROSIR' => 'CITY HARDWARE & CITY GROSIR',
+        'CITY HARDWARE DAN CITY GROSIR' => 'CITY HARDWARE & CITY GROSIR',
+        'CITY HARDWARE' => 'CITY HARDWARE & CITY GROSIR',
+        'CITY GROSIR' => 'CITY HARDWARE & CITY GROSIR',
+        'LIVE HOST CITY GROSIR & CITY HARDWARE' => 'LIVE HOST CG & CH',
+        'LIVE HOST CG & CH' => 'LIVE HOST CG & CH',
+        'TIKTOK & TOKPED ARLIANA' => 'TIKTOK & TOKPED - ARLIANA',
+        'TIKTOK/TOKPED - ARLIANA' => 'TIKTOK & TOKPED - ARLIANA',
+        'SHOPEE BELLA' => 'SHOPEE - BELLA',
+        'WILLIAM' => 'WILIAM',
+        'LAIN - LAIN' => 'LAINNYA',
+        'LAIN-LAIN' => 'LAINNYA',
+        'LAIN LAIN' => 'LAINNYA',
+        'LAINNYA' => 'LAINNYA',
+    ],
+];

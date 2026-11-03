@@ -1,0 +1,440 @@
+/* =========================================================
+   Dashboard Mobile Fix V3
+   Lokasi file: public/css/mobile-dashboard-fix.css
+
+   Tujuan:
+   - Main dashboard tidak boleh melebar keluar layar HP.
+   - Yang boleh scroll kanan/kiri hanya table/tab tertentu.
+   - Card, chart, button, panel harus masuk dalam batas layar.
+   ========================================================= */
+
+@media (max-width: 991.98px) {
+    html,
+    body {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: hidden !important;
+    }
+
+    body {
+        position: relative;
+    }
+
+    .app-content,
+    main,
+    .main-content,
+    .content-wrapper,
+    .page-shell,
+    .container,
+    .container-fluid {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        overflow-x: hidden !important;
+    }
+
+    .page-shell {
+        padding-left: .5rem !important;
+        padding-right: .5rem !important;
+    }
+
+    /*
+       Ini penting:
+       Banyak masalah responsive terjadi karena item flex/grid punya min-width bawaan.
+       Akibatnya card/chart keluar dari layar.
+    */
+    .app-content *,
+    .page-shell * {
+        min-width: 0;
+    }
+
+    /* Jangan biarkan row bootstrap membuat overflow */
+    .row {
+        width: 100% !important;
+        max-width: 100% !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+    }
+
+    .row > [class*="col-"] {
+        max-width: 100% !important;
+        padding-left: .35rem !important;
+        padding-right: .35rem !important;
+    }
+
+    /* =====================================================
+       BUSINESS ANALYTICS / DASHBOARD AREA
+       ===================================================== */
+
+    .ba-hero,
+    .ba-card,
+    .ba-panel,
+    .ba-insight,
+    .ba-action,
+    .ba-sync-note,
+    .filter-panel {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+    }
+
+    .ba-hero {
+        padding: .85rem !important;
+        border-radius: 14px !important;
+    }
+
+    .ba-hero h1 {
+        font-size: 1.05rem !important;
+        line-height: 1.25 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .ba-hero p {
+        font-size: .72rem !important;
+        line-height: 1.35 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .ba-hero > div {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+
+    .ba-hero .d-flex,
+    .ba-hero form,
+    .ba-hero .btn,
+    .ba-hero .badge {
+        max-width: 100% !important;
+    }
+
+    .ba-hero > .d-flex,
+    .ba-hero div.d-flex.flex-wrap {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        width: 100% !important;
+        gap: .45rem !important;
+    }
+
+    .ba-hero .btn,
+    .ba-hero .badge {
+        width: 100% !important;
+        justify-content: center !important;
+        text-align: center !important;
+        white-space: normal !important;
+    }
+
+    .ba-card {
+        padding: .8rem !important;
+        border-radius: 12px !important;
+    }
+
+    .ba-card-label,
+    .ba-section-label {
+        font-size: .62rem !important;
+        line-height: 1.25 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .ba-card-value,
+    .ba-health-score {
+        font-size: 1.05rem !important;
+        line-height: 1.15 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .ba-card-note,
+    .ba-subtitle,
+    .ba-insight-text,
+    .ba-signal-text {
+        font-size: .68rem !important;
+        line-height: 1.35 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .ba-title,
+    .ba-insight-title,
+    .ba-action-title,
+    .ba-signal-title {
+        font-size: .82rem !important;
+        line-height: 1.25 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .ba-panel {
+        padding: .8rem !important;
+        border-radius: 12px !important;
+    }
+
+    /* Grid dashboard yang tadinya 2/3/4 kolom dijadikan 1 kolom di HP */
+    .ba-mini-grid,
+    .ba-status-grid,
+    .ba-test,
+    .ba-driver-row {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        gap: .5rem !important;
+    }
+
+    .ba-driver-row {
+        padding: .55rem 0 !important;
+    }
+
+    .ba-driver-row > *,
+    .ba-test > *,
+    .ba-mini,
+    .ba-status-box {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .ba-status-box,
+    .ba-mini {
+        padding: .55rem !important;
+    }
+
+    /* Season grid jangan 6 kolom di layar kecil, supaya tidak melebar */
+    .ba-season-grid {
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        gap: .35rem !important;
+    }
+
+    .ba-season {
+        min-width: 0 !important;
+        width: 100% !important;
+        padding: .4rem .15rem !important;
+        font-size: .58rem !important;
+    }
+
+    /* Breadcrumb / tab / pill boleh scroll sendiri, bukan membuat body melebar */
+    .ba-breadcrumb,
+    .nav,
+    .nav-tabs,
+    .nav-pills,
+    .dashboard-tabs,
+    .analysis-tabs,
+    .tab-buttons,
+    .tabs {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        flex-wrap: nowrap !important;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: .25rem;
+    }
+
+    .ba-breadcrumb a,
+    .ba-breadcrumb span,
+    .nav .nav-link,
+    .nav-tabs .nav-link,
+    .nav-pills .nav-link,
+    .dashboard-tabs .btn,
+    .analysis-tabs .btn,
+    .tab-buttons .btn,
+    .tabs .btn {
+        flex: 0 0 auto !important;
+        white-space: nowrap !important;
+        max-width: none !important;
+    }
+
+    /* Tetapi kalau tombol biasa di card/panel, biarkan full width */
+    .ba-panel .btn,
+    .ba-card .btn,
+    .ba-action .btn {
+        white-space: normal !important;
+    }
+
+    /* Chart harus ikut lebar parent, jangan membawa width lama Chart.js */
+    .ba-chart-wrap,
+    .chart-wrap,
+    .chart-wrapper,
+    .chart-container,
+    .chart-panel,
+    .chart-card {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        position: relative;
+    }
+
+    .ba-panel canvas,
+    .chart-panel canvas,
+    .chart-card canvas,
+    canvas[id*="Chart"],
+    #businessAnalyticsTrendChart {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        height: auto !important;
+        max-height: 260px !important;
+    }
+
+    /* Khusus donut/pie chart agar tidak kepotong */
+    canvas[id*="Pie"],
+    canvas[id*="Donut"],
+    canvas[id*="Doughnut"],
+    canvas[id*="Contribution"],
+    canvas[id*="contribution"] {
+        max-height: 220px !important;
+    }
+
+    /* Table boleh lebar, tapi hanya wrapper table yang scroll */
+    .ba-table-wrap,
+    .report-table-wrap,
+    .raw-table-wrap,
+    .table-responsive {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: auto !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .ba-table,
+    table.ba-table {
+        min-width: 680px !important;
+        width: max-content !important;
+    }
+
+    .report-table,
+    table.report-table {
+        min-width: 620px !important;
+        width: max-content !important;
+    }
+
+    .raw-table,
+    table.raw-table {
+        min-width: 1050px !important;
+        width: max-content !important;
+    }
+
+    .ba-table th,
+    .ba-table td,
+    .report-table th,
+    .report-table td,
+    .raw-table th,
+    .raw-table td {
+        white-space: nowrap !important;
+    }
+
+    /* Text panjang jangan mendorong card keluar layar */
+    p,
+    span,
+    div,
+    small,
+    strong,
+    label,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+        max-width: 100%;
+    }
+
+    .ba-action,
+    .ba-risk,
+    .ba-opportunity,
+    .ba-evidence {
+        overflow-wrap: anywhere !important;
+        word-break: normal !important;
+    }
+
+    .ba-evidence ul {
+        padding-left: 1rem !important;
+    }
+}
+
+/* HP kecil */
+@media (max-width: 575.98px) {
+    .page-shell {
+        padding-left: .35rem !important;
+        padding-right: .35rem !important;
+    }
+
+    .ba-hero,
+    .ba-panel,
+    .ba-card,
+    .filter-panel {
+        padding: .7rem !important;
+    }
+
+    .ba-hero h1 {
+        font-size: .98rem !important;
+    }
+
+    .ba-hero p {
+        font-size: .68rem !important;
+    }
+
+    .ba-title,
+    .ba-insight-title,
+    .ba-action-title,
+    .ba-signal-title {
+        font-size: .78rem !important;
+    }
+
+    .ba-season-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+
+    .ba-table,
+    table.ba-table {
+        min-width: 620px !important;
+    }
+
+    .report-table,
+    table.report-table {
+        min-width: 580px !important;
+    }
+
+    .raw-table,
+    table.raw-table {
+        min-width: 980px !important;
+    }
+
+    .ba-panel canvas,
+    .chart-panel canvas,
+    .chart-card canvas,
+    canvas[id*="Chart"] {
+        max-height: 220px !important;
+    }
+}
+
+/* HP sangat kecil */
+@media (max-width: 390px) {
+    .page-shell {
+        padding-left: .25rem !important;
+        padding-right: .25rem !important;
+    }
+
+    .ba-hero,
+    .ba-panel,
+    .ba-card,
+    .filter-panel {
+        padding: .6rem !important;
+    }
+
+    .ba-table,
+    table.ba-table {
+        min-width: 580px !important;
+    }
+
+    .report-table,
+    table.report-table {
+        min-width: 540px !important;
+    }
+}
