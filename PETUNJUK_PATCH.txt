@@ -1,0 +1,28 @@
+PATCH PENCARIAN SPAREPART - 11 NOVEMBER 2026
+===========================================
+Repository sumber: https://github.com/itingco/service (branch main)
+
+FILE LARAVEL YANG DIUBAH (HANYA 1):
+app/Services/Spareparts/SparepartSimilarityRepository.php
+
+PERBAIKAN:
+- Menemukan tabel Similar Items yang benar-benar ada di SQL Server DB_AppHub.
+- Mengutamakan nama tabel dari PRODUCT_STRATEGY_SIMILAR_TABLE jika tersedia.
+- Mendukung dbo.ItemSimmilar (sesuai screenshot) dan dbo.ItemSimilar (ejaan historis).
+- Koneksi database gagal tetap dianggap error; tidak diperlakukan sebagai stok kosong.
+- Struktur data, tabel ERP dan logika perhitungan stok tidak diubah.
+
+CARA PASANG DI WINDOWS:
+1. Backup file lokal:
+   C:\xampp82\htdocs\services\app\Services\Spareparts\SparepartSimilarityRepository.php
+2. Copy folder app dari ZIP ke C:\xampp82\htdocs\services\ (overwrite).
+3. Di PowerShell jalankan:
+   cd C:\xampp82\htdocs\services
+   php artisan optimize:clear
+4. Test pencarian RGH9028-2-SP-77 dengan opsi AS_INGCO + AS_SMI.
+5. Jika muncul error lain, baca storage/logs/laravel.log.
+
+CATATAN:
+- Pastikan .env menunjuk server dan database DB_AppHub yang benar.
+- Patch ini tidak menyentuh .env, tidak mengubah database, dan tidak menjalankan migrasi.
+- Belum diuji langsung terhadap database lokal pengguna.
